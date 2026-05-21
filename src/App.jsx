@@ -4,9 +4,13 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from "recharts";
+import ErrorsTab, { computeErrorBadge } from "./ErrorsTab.jsx";
 
 const CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vS0I-yVy4ae2MvmSq44r2kFJNc-5lpcX4395tXu9hzplrgfVJ2U5CvC1FS0NAXQtM56w7I8tAnKjZIL/pub?gid=0&single=true&output=csv";
+
+const ERRORS_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vS0I-yVy4ae2MvmSq44r2kFJNc-5lpcX4395tXu9hzplrgfVJ2U5CvC1FS0NAXQtM56w7I8tAnKjZIL/pub?gid=321461290&single=true&output=csv";
 
 const PIE_COLORS = ["#1F3864", "#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#8B5CF6"];
 
@@ -130,6 +134,42 @@ export default function App() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [stateSel, setStateSel] = useState("all");
+  const [activeTab, setActiveTab] = useState("dashboard");
+
+  const [errorRows, setErrorRows] = useState([]);
+  const [errorsLoading, setErrorsLoading] = useState(true);
+  const [errorsError, setErrorsError] = useState(null);
+
+  const fetchErrors = useCallback(() => {
+    setErrorsLoading(true);
+    setErrorsError(null);
+    fetch(ERRORS_CSV_URL + "&t=" + Date.now())
+      .then((r) => {
+        if (!r.ok) throw new Error("Fetch failed: " + r.status);
+        return r.text();
+      })
+      .then((text) => {
+        const parsed = Papa.parse(text, {
+          header: true,
+          skipEmptyLines: true,
+        });
+        setErrorRows(parsed.data);
+        setErrorsLoading(false);
+      })
+      .catch((e) => {
+        setErrorsError(e.message);
+        setErrorsLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    fetchErrors();
+  }, [fetchErrors]);
+
+  const errorBadgeCount = useMemo(
+    () => computeErrorBadge(errorRows),
+    [errorRows]
+  );
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -212,10 +252,81 @@ export default function App() {
           <p className="text-sm text-gray-500 mt-1">
             Voice AI helping Indian workers find jobs
           </p>
+          <div className="mt-4 flex items-center gap-1">
+            {[
+              { k: "dashboard", label: "Dashboard" },
+              { k: "errors", label: "Errors" },
+            ].map((opt) => (
+              <button
+                key={opt.k}
+                onClick={() => setActiveTab(opt.k)}
+                className={`px-3 py-1.5 text-sm rounded border inline-flex items-center gap-2 ${
+                  activeTab === opt.k
+                    ? "bg-[#1F3864] text-white border-[#1F3864]"
+                    : "bg-white border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <span>{opt.label}</span>
+                {opt.k === "errors" && errorBadgeCount > 0 && (
+                  <span className="bg-[#EF4444] text-white text-xs font-semibold rounded-full px-2 py-0.5 leading-none">
+                    {errorBadgeCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6">
+        {activeTab === "errors" ? (
+          <ErrorsTab
+            rows={errorRows}
+            loading={errorsLoading}
+            error={errorsError}
+            onRetry={fetchErrors}
+          />
+        ) : (
+          <DashboardContent
+            loading={loading}
+            error={error}
+            fetchData={fetchData}
+            startDate={startDate}
+            setStartDate={setStartDate}
+            endDate={endDate}
+            setEndDate={setEndDate}
+            stateSel={stateSel}
+            setStateSel={setStateSel}
+            resetFilters={resetFilters}
+            dateRangeLabel={dateRangeLabel}
+            stateLabel={stateLabel}
+            metrics={metrics}
+            topicData={topicData}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function DashboardContent({
+  loading,
+  error,
+  fetchData,
+  startDate,
+  setStartDate,
+  endDate,
+  setEndDate,
+  stateSel,
+  setStateSel,
+  resetFilters,
+  dateRangeLabel,
+  stateLabel,
+  metrics,
+  topicData,
+}) {
+  return (
+    <>
         <div className="bg-[#F8F9FA] rounded-lg p-4 mb-6 flex flex-wrap items-end gap-4">
           <div className="flex flex-col">
             <label className="text-xs text-gray-600 mb-1">From</label>
@@ -438,7 +549,6 @@ export default function App() {
             </div>
           </div>
         </section>
-      </main>
-    </div>
+    </>
   );
 }
