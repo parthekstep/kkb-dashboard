@@ -22,11 +22,12 @@ const metricsSchema = {
       type: 'string',
       enum: ['Hindi', 'Kannada', 'English', 'Unknown'],
     },
+    summary_3line: { type: 'string' },
   },
   required: [
     'call_id', 'phone', 'call_duration_seconds', 'call_datetime_ist',
     'call_answered', 'call_engaged', 'applied_to_job', 'applications_count',
-    'jobs_shown', 'primary_topic', 'call_language',
+    'jobs_shown', 'primary_topic', 'call_language', 'summary_3line',
   ],
 };
 
@@ -55,6 +56,7 @@ RULES:
 9. jobs_shown — Yes if bot presented a list of jobs
 10. primary_topic — one of the 5 allowed values
 11. call_language — one of the 4 allowed values
+12. summary_3line — a concise 3-line plain-English summary of what happened on the call. Line 1: who the caller is and what they wanted. Line 2: what the bot did (jobs shown, profile updated, application submitted, etc.). Line 3: outcome and any next steps. Use \\n as the line separator. If the call wasn't answered or had no content, return "Call not answered" or "No conversation took place".
 
 Output valid JSON only.`;
 }
@@ -69,7 +71,6 @@ export async function taskA_metrics(payload) {
   const outcome = body.outcome ?? '';
   const start_time = body.call_start_time ?? '';
   const recording_url = body.call_recording_url ?? '';
-  const summary = body.call_output?.summary ?? '';
   const raw_transcript = JSON.stringify(transcript);
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -89,27 +90,29 @@ export async function taskA_metrics(payload) {
   if (!content) throw new Error('OpenAI returned empty content for metrics');
   const m = JSON.parse(content);
 
-  const campaign_date = typeof start_time === 'string' && start_time.includes('T')
-    ? start_time.split('T')[0]
-    : '';
-
+  // 19-column layout matches the Sheet1 header. Cols 1-4 are reserved for
+  // manual fill (campaign_day, campaign_date, campaign_type, language); the
+  // webhook leaves them blank so a human/script can populate them later.
   const row = [
-    m.call_id,
-    m.phone,
-    m.call_duration_seconds,
-    m.call_datetime_ist,
-    outcome,                  // call_outcome
-    m.call_answered,
-    m.call_engaged,
-    m.applied_to_job,
-    m.applications_count,
-    m.jobs_shown,
-    m.primary_topic,
-    m.call_language,
-    recording_url,
-    summary,
-    raw_transcript,
-    campaign_date,
+    '',                          //  1  campaign_day         (manual)
+    '',                          //  2  campaign_date        (manual)
+    '',                          //  3  campaign_type        (manual)
+    '',                          //  4  language             (manual)
+    m.call_id,                   //  5  call_id
+    m.phone,                     //  6  phone
+    m.call_duration_seconds,     //  7  call_duration_seconds
+    m.call_datetime_ist,         //  8  call_datetime_ist
+    outcome,                     //  9  call_outcome
+    m.call_answered,             // 10  call_answered
+    m.call_engaged,              // 11  call_engaged
+    m.applied_to_job,            // 12  applied_to_job
+    m.applications_count,        // 13  applications_count
+    m.jobs_shown,                // 14  jobs_shown
+    m.primary_topic,             // 15  primary_topic
+    m.call_language,             // 16  call_language
+    recording_url,               // 17  call_recording_url
+    m.summary_3line,             // 18  final_summary
+    raw_transcript,              // 19  call_transcript
   ];
 
   await appendCallRecord(row);
