@@ -37,13 +37,20 @@ function computeMetrics(rows) {
   let seekersApplied = 0;
   let seekersAnswered = 0;
   let seekersNotApplied = 0;
+  let seekersFailedApply = 0;
   for (const [, list] of byPhone) {
     const anyAnswered = list.some((r) => yesNo(r.call_answered));
     const anyApplied = list.some((r) => yesNo(r.applied_to_job));
+    // tried_to_apply now tracks failed apply attempts only (user consented
+    // or apply tool was invoked, but the application did not confirm).
+    const anyFailedApply = list.some((r) => yesNo(r.tried_to_apply));
     if (anyAnswered) seekersAnswered += 1;
     if (anyApplied) seekersApplied += 1;
     if (anyAnswered && !anyApplied) seekersNotApplied += 1;
+    if (anyFailedApply && !anyApplied) seekersFailedApply += 1;
   }
+  // Failed-apply rate denominator = anyone who tried (succeeded or failed).
+  const seekersAttemptedApply = seekersApplied + seekersFailedApply;
 
   const totalApplications = rows.reduce(
     (sum, r) => sum + (parseInt(r.applications_count, 10) || 0),
@@ -85,6 +92,12 @@ function computeMetrics(rows) {
     totalJobSeekersAnswered: seekersAnswered,
     seekersApplied,
     seekersNotApplied,
+    seekersFailedApply,
+    seekersAttemptedApply,
+    failedApplyRate:
+      seekersAttemptedApply > 0
+        ? (seekersFailedApply / seekersAttemptedApply) * 100
+        : 0,
     totalApplications,
     applicationRate:
       seekersAnswered > 0 ? (seekersApplied / seekersAnswered) * 100 : 0,
@@ -404,13 +417,13 @@ function DashboardContent({
             Outcome Metrics
           </h2>
           {loading ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-              {Array.from({ length: 5 }).map((_, i) => (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
                 <SkeletonCard key={i} />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <Card
                 title="Job Seekers Called"
                 value={fmtNum(metrics.totalJobSeekersCalled)}
@@ -421,6 +434,12 @@ function DashboardContent({
                 value={fmtNum(metrics.seekersApplied)}
                 subtext={`${fmtPct(metrics.applicationRate)} of seekers who answered`}
                 borderColor="#22C55E"
+              />
+              <Card
+                title="Failed Apply Attempts"
+                value={fmtNum(metrics.seekersFailedApply)}
+                subtext={`${fmtPct(metrics.failedApplyRate)} of seekers who tried`}
+                borderColor="#F59E0B"
               />
               <Card
                 title="Did Not Apply"

@@ -1,6 +1,23 @@
 import { useMemo, useState } from "react";
 
 const fmtNum = (n) => Number(n || 0).toLocaleString("en-IN");
+
+function parseBatchIds(s) {
+  return (s || "")
+    .split(/[\s,]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+async function retryError({ call_id, task, timestamp_ist, batch_ids }) {
+  const res = await fetch("/api/retry-error", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ call_id, task, timestamp_ist, batch_ids }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok && data.ok, message: data.message || `HTTP ${res.status}` };
+}
 const truthy = (v) => String(v ?? "").trim().toLowerCase() === "true";
 
 function parseTimestamp(s) {
@@ -91,6 +108,26 @@ function truncate(s, n) {
 
 export default function ErrorsTab({ rows, loading, error, onRetry }) {
   const [taskFilter, setTaskFilter] = useState("all");
+  const [batchIdsText, setBatchIdsText] = useState("");
+  // Map<rowKey, {status:'idle'|'retrying'|'recovered'|'failed', message?:string}>
+  const [retryState, setRetryState] = useState({});
+
+  const handleRetry = async (r, key) => {
+    setRetryState((s) => ({ ...s, [key]: { status: "retrying" } }));
+    const batch_ids = parseBatchIds(batchIdsText);
+    const { ok, message } = await retryError({
+      call_id: r.call_id,
+      task: r.task,
+      timestamp_ist: r.timestamp_ist,
+      batch_ids,
+    });
+    setRetryState((s) => ({
+      ...s,
+      [key]: { status: ok ? "recovered" : "failed", message },
+    }));
+    // Re-pull errors list so the recovered row disappears (and any new error from a failed retry shows up).
+    setTimeout(() => onRetry?.(), 800);
+  };
 
   const summary = useMemo(() => {
     const total = rows.length;
@@ -202,6 +239,27 @@ export default function ErrorsTab({ rows, loading, error, onRetry }) {
         )}
       </section>
 
+      <section className="mb-6">
+        <div className="bg-[#F8F9FA] rounded-lg p-4 flex flex-wrap items-end gap-3">
+          <div className="flex flex-col flex-1 min-w-[300px]">
+            <label className="text-xs text-gray-600 mb-1">
+              Batch IDs (for retry — comma or space separated). Needed so we can
+              recover <code>contact_id</code> for profile retries.
+            </label>
+            <input
+              type="text"
+              value={batchIdsText}
+              onChange={(e) => setBatchIdsText(e.target.value)}
+              placeholder="e.g. 1601, 1602"
+              className="border border-gray-300 rounded px-2 py-1 text-sm bg-white"
+            />
+          </div>
+          <div className="text-xs text-gray-500">
+            {parseBatchIds(batchIdsText).length} batch ID(s) provided
+          </div>
+        </div>
+      </section>
+
       <section className="mb-8">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-[#1F3864]">Errors</h2>
@@ -252,6 +310,7 @@ export default function ErrorsTab({ rows, loading, error, onRetry }) {
                     <th className="px-4 py-3">Error Message</th>
                     <th className="px-4 py-3">Retry</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -261,9 +320,11 @@ export default function ErrorsTab({ rows, loading, error, onRetry }) {
                     const callId = r.call_id ?? "";
                     const shortCallId =
                       callId.length > 8 ? callId.slice(0, 8) + "…" : callId;
+                    const rowKey = `${callId}-${r.timestamp_ist}-${idx}`;
+                    const rState = retryState[rowKey] || { status: "idle" };
                     return (
                       <tr
-                        key={`${callId}-${r.timestamp_ist}-${idx}`}
+                        key={rowKey}
                         className="border-b border-gray-200 last:border-0 hover:bg-white/60"
                       >
                         <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
@@ -292,6 +353,32 @@ export default function ErrorsTab({ rows, loading, error, onRetry }) {
                             retryAttempted={ra}
                             retrySucceeded={rs}
                           />
+                        </td>
+                        <td className="px-4 py-3">
+                          {rState.status === "retrying" ? (
+                            <span className="text-xs text-gray-500">Retrying…</span>
+                          ) : rState.status === "recovered" ? (
+                            <span className="text-xs text-green-700">✓ Recovered</span>
+                          ) : rState.status === "failed" ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-xs text-red-700" title={rState.message}>
+                                ✗ Failed
+                              </span>
+                              <button
+                                onClick={() => handleRetry(r, rowKey)}
+                                className="text-xs text-blue-600 underline self-start"
+                              >
+                                Try again
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleRetry(r, rowKey)}
+                              className="bg-[#1F3864] text-white rounded px-2.5 py-1 text-xs hover:opacity-90"
+                            >
+                              Retry
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );

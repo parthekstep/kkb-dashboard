@@ -31,6 +31,56 @@ export async function appendCallRecord(row) {
   });
 }
 
+/**
+ * Find the 1-based sheet row index of an error matching (call_id, task, timestamp_ist).
+ * Returns null if not found. `timestamp_ist` may be omitted to match the most recent
+ * row for that (call_id, task).
+ */
+export async function findErrorRow(call_id, task, timestamp_ist) {
+  const sheets = getSheetsClient();
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: process.env.SPREADSHEET_ID,
+    range: 'Errors!A:D',
+  });
+  const rows = data.values ?? [];
+  // rows[0] is header; iterate from end (newest) so unspecified timestamp picks latest
+  for (let i = rows.length - 1; i >= 1; i--) {
+    const [ts, cid, , tk] = rows[i];
+    if (cid === call_id && (tk || '').toLowerCase() === task.toLowerCase()) {
+      if (!timestamp_ist || ts === timestamp_ist) return i + 1; // 1-based
+    }
+  }
+  return null;
+}
+
+/**
+ * Delete a row from the Errors sheet by its 1-based row index. Uses the
+ * batchUpdate/deleteDimension API since `values` API can't delete rows.
+ */
+export async function deleteErrorRowByIndex(rowIndex1Based) {
+  const sheets = getSheetsClient();
+  // Need the sheetId (gid) for the "Errors" tab.
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: process.env.SPREADSHEET_ID });
+  const errorsSheet = meta.data.sheets.find((s) => s.properties.title === 'Errors');
+  if (!errorsSheet) throw new Error('Errors tab not found');
+  const sheetId = errorsSheet.properties.sheetId;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: process.env.SPREADSHEET_ID,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: rowIndex1Based - 1, // API is 0-based
+            endIndex: rowIndex1Based,
+          },
+        },
+      }],
+    },
+  });
+}
+
 function istTimestamp() {
   const d = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
   return d.toISOString().replace('T', ' ').slice(0, 19);

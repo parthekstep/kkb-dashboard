@@ -57,8 +57,8 @@ RULES:
 9. jobs_shown — Yes if bot presented a list of jobs
 10. primary_topic — one of the 5 allowed values
 11. call_language — one of the 4 allowed values
-12. summary_3line — a concise 3-line plain-English summary. Line 1: who the caller is and what they wanted. Line 2: what the bot did. Line 3: outcome. Use \\n as separator. If no conversation, return "Call not answered."
-13. tried_to_apply — Yes if the USER expressed intent to apply OR the bot ATTEMPTED to submit an application, even if it may have failed. This is broader than applied_to_job (which requires confirmed success).
+12. summary_3line — a concise 3-line plain-English summary FROM THE USER'S POINT OF VIEW. Line 1: the user's overall response/engagement (interested, disengaged, confused, hung up, etc.). Line 2: key actions the user took (asked for jobs in X city, agreed to apply for job Y, gave their name/age, etc.). Line 3: key failures or unresolved issues from the user's perspective (couldn't find jobs they wanted, apply failed, bot didn't understand them, call dropped, etc. — or "None" if the call went smoothly). Use \\n as separator. If no conversation, return "Call not answered."
+13. tried_to_apply — This column now tracks FAILED apply attempts only. Yes ONLY when BOTH are true: (i) the user explicitly consented to apply OR the bot invoked the apply_jobs tool, AND (ii) the application did NOT confirm successfully (no "अप्लाई हो गया है" / "apply ho gaya" / "application submitted" from the bot, OR the bot acknowledged an error from the tool). If applied_to_job=Yes, this MUST be No. If the user never consented and no apply tool was invoked, this is No. If jobs_shown=No this is almost always No.
 
 Output valid JSON only.`;
 }
@@ -69,7 +69,19 @@ export async function taskA_metrics(payload) {
   const phone = body.contact_phone || body.to_number || '';
   const duration = body.call_duration;
   const transcript = Array.isArray(body.call_transcript) ? body.call_transcript : [];
-  const transcript_text = transcript.map((t) => t?.content ?? '').join(' ');
+  // Build LLM-visible transcript: include role labels and surface tool-call names
+  // (so the model can see if apply_jobs was actually invoked).
+  const transcript_text = transcript
+    .map((t) => {
+      if (t?.role === 'tool') return ''; // strip large tool results
+      if (t?.role === 'assistant' && Array.isArray(t.tool_calls) && t.tool_calls.length) {
+        const names = t.tool_calls.map((tc) => tc?.function?.name || tc?.name || 'tool').join(',');
+        return `assistant[tool_call:${names}]: ${t.content ?? ''}`;
+      }
+      return `${t?.role ?? 'unknown'}: ${t?.content ?? ''}`;
+    })
+    .filter(Boolean)
+    .join('\n');
   const outcome = body.outcome ?? '';
   const start_time = body.call_start_time ?? '';
   const recording_url = body.call_recording_url ?? '';

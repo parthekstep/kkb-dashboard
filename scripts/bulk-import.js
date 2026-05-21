@@ -97,12 +97,12 @@ RULES:
 1. call_answered — Yes if duration > 0 and transcript has meaningful content, else No
 2. call_engaged — Yes only if call_answered=Yes AND duration > 10 seconds
 3. applied_to_job — Yes if application was CONFIRMED submitted (bot said "apply ho gaya", "application submitted" or equivalent)
-4. tried_to_apply — Yes if the USER expressed intent to apply OR the bot ATTEMPTED to submit an application, even if it may have failed due to an error. This is broader than applied_to_job.
+4. tried_to_apply — FAILED apply attempts only. Yes ONLY when BOTH: (i) user consented OR bot invoked apply tool, AND (ii) the application did NOT confirm successfully. If applied_to_job=Yes, this MUST be No. If user never consented and no apply tool was invoked, this is No.
 5. applications_count — count of confirmed successful applications, default 0
 6. jobs_shown — Yes if bot presented a list of jobs to the user
 7. primary_topic — one of the 5 allowed values
 8. call_language — detected language of the conversation
-9. summary_3line — 3-line plain English summary. Line 1: who the caller is and what they wanted. Line 2: what the bot did. Line 3: outcome. Use \\n as separator. If no real conversation, write "Call not answered" or "No meaningful conversation."
+9. summary_3line — 3-line plain English summary FROM THE USER'S POINT OF VIEW. Line 1: the user's overall response/engagement (interested, disengaged, confused, hung up, etc.). Line 2: key actions the user took (asked for jobs in X city, agreed to apply for job Y, gave their name/age, etc.). Line 3: key failures or unresolved issues from the user's perspective (couldn't find jobs they wanted, apply failed, bot didn't understand them, call dropped, etc. — or "None"). Use \\n as separator. If no real conversation, write "Call not answered" or "No meaningful conversation."
 
 Output valid JSON only.`;
 }
@@ -134,8 +134,16 @@ async function extractFromTranscript(row, campaignLanguage) {
     const parsed = JSON.parse(transcript);
     if (Array.isArray(parsed)) {
       transcript_text = parsed
-        .filter((t) => t?.role !== 'tool' && typeof t?.content === 'string')
-        .map((t) => `${t.role}: ${t.content}`)
+        .map((t) => {
+          if (t?.role === 'tool') return '';
+          if (t?.role === 'assistant' && Array.isArray(t.tool_calls) && t.tool_calls.length) {
+            const names = t.tool_calls.map((tc) => tc?.function?.name || tc?.name || 'tool').join(',');
+            return `assistant[tool_call:${names}]: ${t.content ?? ''}`;
+          }
+          if (typeof t?.content === 'string') return `${t.role}: ${t.content}`;
+          return '';
+        })
+        .filter(Boolean)
         .join('\n');
     }
   } catch { /* leave as raw string */ }
