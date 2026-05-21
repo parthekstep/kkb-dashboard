@@ -23,11 +23,12 @@ const metricsSchema = {
       enum: ['Hindi', 'Kannada', 'English', 'Unknown'],
     },
     summary_3line: { type: 'string' },
+    tried_to_apply: { type: 'string', enum: ['Yes', 'No'] },
   },
   required: [
     'call_id', 'phone', 'call_duration_seconds', 'call_datetime_ist',
     'call_answered', 'call_engaged', 'applied_to_job', 'applications_count',
-    'jobs_shown', 'primary_topic', 'call_language', 'summary_3line',
+    'jobs_shown', 'primary_topic', 'call_language', 'summary_3line', 'tried_to_apply',
   ],
 };
 
@@ -56,7 +57,8 @@ RULES:
 9. jobs_shown — Yes if bot presented a list of jobs
 10. primary_topic — one of the 5 allowed values
 11. call_language — one of the 4 allowed values
-12. summary_3line — a concise 3-line plain-English summary of what happened on the call. Line 1: who the caller is and what they wanted. Line 2: what the bot did (jobs shown, profile updated, application submitted, etc.). Line 3: outcome and any next steps. Use \\n as the line separator. If the call wasn't answered or had no content, return "Call not answered" or "No conversation took place".
+12. summary_3line — a concise 3-line plain-English summary. Line 1: who the caller is and what they wanted. Line 2: what the bot did. Line 3: outcome. Use \\n as separator. If no conversation, return "Call not answered."
+13. tried_to_apply — Yes if the USER expressed intent to apply OR the bot ATTEMPTED to submit an application, even if it may have failed. This is broader than applied_to_job (which requires confirmed success).
 
 Output valid JSON only.`;
 }
@@ -71,7 +73,16 @@ export async function taskA_metrics(payload) {
   const outcome = body.outcome ?? '';
   const start_time = body.call_start_time ?? '';
   const recording_url = body.call_recording_url ?? '';
-  const raw_transcript = JSON.stringify(transcript);
+  // Strip tool-call result messages (large job-listing blobs) before storing
+  const cleaned_transcript = transcript
+    .filter((t) => t?.role !== 'tool')
+    .map((t) => t?.role === 'assistant' && t.tool_calls && !t.content
+      ? { role: 'assistant', content: '[tool call]' }
+      : { role: t.role, content: t.content ?? '' });
+  const raw_transcript_str = JSON.stringify(cleaned_transcript);
+  const raw_transcript = raw_transcript_str.length > 40000
+    ? raw_transcript_str.slice(0, 40000) + '…"]'
+    : raw_transcript_str;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const completion = await openai.chat.completions.create({
@@ -113,6 +124,7 @@ export async function taskA_metrics(payload) {
     recording_url,               // 17  call_recording_url
     m.summary_3line,             // 18  final_summary
     raw_transcript,              // 19  call_transcript
+    m.tried_to_apply,            // 20  tried_to_apply
   ];
 
   await appendCallRecord(row);
