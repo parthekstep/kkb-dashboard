@@ -30,7 +30,11 @@ const EMBED_DIMENSIONS = 1024;
 //   TRANSCRIPT_PREVIEW_CAP — what we store in Pinecone metadata for chat-time
 //     quoting. Pinecone metadata caps at 40 KB per vector across all fields;
 //     4 KB keeps us well under that with room for everything else.
-const TRANSCRIPT_EMBED_CAP = 24000;
+// 14k chars handles long Hindi/Kannada transcripts safely. text-embedding-3-small
+// max is 8192 tokens. Devanagari/Kannada cost ~2-3 chars per token, so 14k chars
+// is at most ~7k tokens — under the limit with headroom. English-only calls fit
+// even larger but the cap is shared.
+const TRANSCRIPT_EMBED_CAP = 14000;
 // Bigger preview = more transcript text the chat LLM can quote for matched
 // calls. Pinecone metadata caps at 40 KB per vector across ALL fields; our
 // other fields total ~500 chars, so 16k chars of preview is comfortably safe.
