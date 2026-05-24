@@ -12,7 +12,12 @@ import Papa from 'papaparse';
 import OpenAI from 'openai';
 import { pineconeUpsert, pineconeFetch } from '../utils/pinecone.js';
 import { appendEmbedManifest } from '../utils/sheets.js';
-import { buildEmbedText, enforceRollingWindow, hasMeaningfulConversation } from '../utils/embed.js';
+import {
+  buildEmbedText,
+  enforceRollingWindow,
+  hasMeaningfulConversation,
+  embedTextWithShrink,
+} from '../utils/embed.js';
 
 const CSV_URL =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vS0I-yVy4ae2MvmSq44r2kFJNc-5lpcX4395tXu9hzplrgfVJ2U5CvC1FS0NAXQtM56w7I8tAnKjZIL/pub?gid=0&single=true&output=csv';
@@ -119,12 +124,7 @@ async function main() {
       };
 
       const text = buildEmbedText(callData);
-      const embRes = await openai.embeddings.create({
-        model: EMBED_MODEL,
-        input: text,
-        dimensions: EMBED_DIMENSIONS,
-      });
-      const values = embRes.data[0].embedding;
+      const values = await embedTextWithShrink(openai, text);
 
       await pineconeUpsert(
         [{

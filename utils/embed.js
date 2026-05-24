@@ -30,11 +30,11 @@ const EMBED_DIMENSIONS = 1024;
 //   TRANSCRIPT_PREVIEW_CAP — what we store in Pinecone metadata for chat-time
 //     quoting. Pinecone metadata caps at 40 KB per vector across all fields;
 //     4 KB keeps us well under that with room for everything else.
-// 14k chars handles long Hindi/Kannada transcripts safely. text-embedding-3-small
-// max is 8192 tokens. Devanagari/Kannada cost ~2-3 chars per token, so 14k chars
-// is at most ~7k tokens — under the limit with headroom. English-only calls fit
-// even larger but the cap is shared.
-const TRANSCRIPT_EMBED_CAP = 14000;
+// Baseline cap. text-embedding-3-small max is 8192 tokens. Devanagari/Kannada
+// occasionally densify to ~1.5 chars/token in worst-case dialogues, so 10k chars
+// + ~500 chars of structured header ≈ 7k tokens safely. embedTextWithShrink()
+// below also retries shorter on context-length errors as a safety net.
+const TRANSCRIPT_EMBED_CAP = 10000;
 // Bigger preview = more transcript text the chat LLM can quote for matched
 // calls. Pinecone metadata caps at 40 KB per vector across ALL fields; our
 // other fields total ~500 chars, so 16k chars of preview is comfortably safe.
@@ -99,13 +99,41 @@ function buildMetadata(c) {
   };
 }
 
+/**
+ * Embed text, automatically shrinking + retrying if OpenAI complains about
+ * context length. Each retry halves the body (keeps the structured header
+ * intact) up to MAX_SHRINK attempts. Exported for bulk-embed.js to reuse.
+ */
+export async function embedTextWithShrink(openai, text) {
+  const MAX_SHRINK = 4;
+  let attempt = 0;
+  let input = text;
+  while (true) {
+    try {
+      const res = await openai.embeddings.create({
+        model: EMBED_MODEL,
+        input,
+        dimensions: EMBED_DIMENSIONS,
+      });
+      return res.data[0].embedding;
+    } catch (e) {
+      const msg = String(e?.message || '');
+      const isCtxErr = msg.includes('maximum context length') || msg.includes('context_length_exceeded');
+      if (!isCtxErr || attempt >= MAX_SHRINK) throw e;
+      // Keep the first ~600 chars (structured English header) intact, halve the rest.
+      const headerEnd = input.indexOf('Transcript: ');
+      const headerLen = headerEnd > 0 ? headerEnd + 'Transcript: '.length : 600;
+      const head = input.slice(0, headerLen);
+      const tail = input.slice(headerLen);
+      input = head + tail.slice(0, Math.floor(tail.length / 2));
+      attempt++;
+      console.warn(`embedTextWithShrink: retry ${attempt} at ${input.length} chars`);
+    }
+  }
+}
+
 async function embedText(openai, text) {
-  const res = await openai.embeddings.create({
-    model: EMBED_MODEL,
-    input: text,
-    dimensions: EMBED_DIMENSIONS,
-  });
-  return res.data[0].embedding;
+  return embedTextWithShrink(openai, text);
 }
 
 export async function embedTranscript(callData) {
