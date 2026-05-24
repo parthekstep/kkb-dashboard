@@ -17,6 +17,7 @@ import {
   enforceRollingWindow,
   hasMeaningfulConversation,
   embedTextWithShrink,
+  trimTranscriptPreview,
 } from '../utils/embed.js';
 
 const CSV_URL =
@@ -141,7 +142,7 @@ async function main() {
             applied_to_job: callData.applied_to_job,
             jobs_shown: callData.jobs_shown,
             final_summary: callData.summary_3line,
-            transcript_preview: callData.transcript_text.slice(0, 16000),
+            transcript_preview: trimTranscriptPreview(callData.transcript_text),
           },
         }],
         NAMESPACE

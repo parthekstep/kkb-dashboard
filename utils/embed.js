@@ -36,9 +36,26 @@ const EMBED_DIMENSIONS = 1024;
 // below also retries shorter on context-length errors as a safety net.
 const TRANSCRIPT_EMBED_CAP = 10000;
 // Bigger preview = more transcript text the chat LLM can quote for matched
-// calls. Pinecone metadata caps at 40 KB per vector across ALL fields; our
-// other fields total ~500 chars, so 16k chars of preview is comfortably safe.
-const TRANSCRIPT_PREVIEW_CAP = 16000;
+// calls. Pinecone metadata caps at 40 KB per vector across ALL fields, and
+// Devanagari/Kannada chars are 3 bytes in UTF-8 — so we cap by BYTES, not
+// chars. 36000 bytes leaves ~4 KB headroom for the other metadata fields.
+const TRANSCRIPT_PREVIEW_CAP_CHARS = 16000;  // char-level pre-trim (fast path)
+const TRANSCRIPT_PREVIEW_CAP_BYTES = 36000;  // hard UTF-8 byte cap
+
+/** Truncate a string so its UTF-8 byte length ≤ maxBytes. */
+function truncateUtf8(s, maxBytes) {
+  const buf = Buffer.from(s, 'utf8');
+  if (buf.length <= maxBytes) return s;
+  // Decode the first maxBytes safely (handle multi-byte cut by stripping a few).
+  let end = maxBytes;
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) end--; // back off into UTF-8 start byte
+  return buf.slice(0, end).toString('utf8');
+}
+
+export function trimTranscriptPreview(raw) {
+  const chars = String(raw || '').slice(0, TRANSCRIPT_PREVIEW_CAP_CHARS);
+  return truncateUtf8(chars, TRANSCRIPT_PREVIEW_CAP_BYTES);
+}
 
 // Minimum total user-spoken characters to consider a call worth embedding.
 // Anything below this is essentially a "hello → bot greeting → user dropped"
@@ -95,7 +112,7 @@ function buildMetadata(c) {
     applied_to_job: String(c.applied_to_job ?? ''),
     jobs_shown: String(c.jobs_shown ?? ''),
     final_summary: String(c.summary_3line ?? ''),
-    transcript_preview: String(c.transcript_text || '').slice(0, TRANSCRIPT_PREVIEW_CAP),
+    transcript_preview: trimTranscriptPreview(c.transcript_text),
   };
 }
 
