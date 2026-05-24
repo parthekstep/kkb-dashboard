@@ -19,6 +19,7 @@ const CSV_URL =
 
 const NAMESPACE = process.env.PINECONE_NAMESPACE || 'kkb';
 const EMBED_MODEL = 'text-embedding-3-small';
+const EMBED_DIMENSIONS = 1024; // Pinecone index is 1024-dim; truncate via OpenAI's dimensions param
 const SLEEP_MS = 200;
 const WINDOW_LIMIT = 200;
 
@@ -105,7 +106,11 @@ async function main() {
       };
 
       const text = buildEmbedText(callData);
-      const embRes = await openai.embeddings.create({ model: EMBED_MODEL, input: text });
+      const embRes = await openai.embeddings.create({
+        model: EMBED_MODEL,
+        input: text,
+        dimensions: EMBED_DIMENSIONS,
+      });
       const values = embRes.data[0].embedding;
 
       await pineconeUpsert(
@@ -123,7 +128,7 @@ async function main() {
             applied_to_job: callData.applied_to_job,
             jobs_shown: callData.jobs_shown,
             final_summary: callData.summary_3line,
-            transcript_preview: callData.transcript_text.slice(0, 500),
+            transcript_preview: callData.transcript_text.slice(0, 4000),
           },
         }],
         NAMESPACE

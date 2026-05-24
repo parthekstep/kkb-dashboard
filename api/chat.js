@@ -23,6 +23,7 @@ import { pineconeQuery } from '../utils/pinecone.js';
 export const config = { runtime: 'nodejs' };
 
 const EMBED_MODEL = 'text-embedding-3-small';
+const EMBED_DIMENSIONS = 1024; // Match the Pinecone index dimension.
 const CHAT_MODEL = 'gpt-4o-mini';
 
 const classifierSchema = {
@@ -109,7 +110,11 @@ export default async function handler(req, res) {
     const isQuant = cls.type === 'quantitative';
 
     // 2. Embed question
-    const embedRes = await openai.embeddings.create({ model: EMBED_MODEL, input: question });
+    const embedRes = await openai.embeddings.create({
+      model: EMBED_MODEL,
+      input: question,
+      dimensions: EMBED_DIMENSIONS,
+    });
     const qVector = embedRes.data[0].embedding;
 
     // 3. Query Pinecone

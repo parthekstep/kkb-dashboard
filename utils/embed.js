@@ -17,10 +17,24 @@ import {
   deleteEmbedManifestRows,
 } from './sheets.js';
 
-const EMBED_MODEL = 'text-embedding-3-small'; // 1536-dim
+const EMBED_MODEL = 'text-embedding-3-small';
+// The Pinecone index is 1024-dim, so we use OpenAI's `dimensions` param to
+// truncate text-embedding-3-small's native 1536-dim output. Truncation is
+// supported by text-embedding-3-* models and preserves most of the signal.
+const EMBED_DIMENSIONS = 1024;
+
+// Caps:
+//   TRANSCRIPT_EMBED_CAP — what we feed into the embedding model. The model
+//     handles up to ~8192 tokens (~24-32k chars); 24k leaves comfortable
+//     headroom while embedding the vast majority of calls in full.
+//   TRANSCRIPT_PREVIEW_CAP — what we store in Pinecone metadata for chat-time
+//     quoting. Pinecone metadata caps at 40 KB per vector across all fields;
+//     4 KB keeps us well under that with room for everything else.
+const TRANSCRIPT_EMBED_CAP = 24000;
+const TRANSCRIPT_PREVIEW_CAP = 4000;
 
 export function buildEmbedText(c) {
-  const transcript = String(c.transcript_text || '').slice(0, 2000);
+  const transcript = String(c.transcript_text || '').slice(0, TRANSCRIPT_EMBED_CAP);
   return [
     `Call ID: ${c.call_id}`,
     `Date: ${c.call_datetime_ist}`,
@@ -46,12 +60,16 @@ function buildMetadata(c) {
     applied_to_job: String(c.applied_to_job ?? ''),
     jobs_shown: String(c.jobs_shown ?? ''),
     final_summary: String(c.summary_3line ?? ''),
-    transcript_preview: String(c.transcript_text || '').slice(0, 500),
+    transcript_preview: String(c.transcript_text || '').slice(0, TRANSCRIPT_PREVIEW_CAP),
   };
 }
 
 async function embedText(openai, text) {
-  const res = await openai.embeddings.create({ model: EMBED_MODEL, input: text });
+  const res = await openai.embeddings.create({
+    model: EMBED_MODEL,
+    input: text,
+    dimensions: EMBED_DIMENSIONS,
+  });
   return res.data[0].embedding;
 }
 
