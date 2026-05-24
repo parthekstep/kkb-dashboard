@@ -12,7 +12,7 @@ import Papa from 'papaparse';
 import OpenAI from 'openai';
 import { pineconeUpsert, pineconeFetch } from '../utils/pinecone.js';
 import { appendEmbedManifest } from '../utils/sheets.js';
-import { buildEmbedText, enforceRollingWindow } from '../utils/embed.js';
+import { buildEmbedText, enforceRollingWindow, hasMeaningfulConversation } from '../utils/embed.js';
 
 const CSV_URL =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vS0I-yVy4ae2MvmSq44r2kFJNc-5lpcX4395tXu9hzplrgfVJ2U5CvC1FS0NAXQtM56w7I8tAnKjZIL/pub?gid=0&single=true&output=csv';
@@ -68,12 +68,25 @@ async function main() {
   const { data } = Papa.parse(csv, { header: true, skipEmptyLines: true });
   console.log(`  ${data.length} total rows`);
 
-  // Only rows with a real transcript + call_id
+  // Only rows worth embedding: call_id present, call was answered, AND the
+  // user actually said something. ~47% of "transcript-bearing" rows are just
+  // a "hello" with no further user content — those would pollute the index.
+  let withTranscript = 0;
+  let skippedNoSignal = 0;
   const targets = data.filter((r) => {
+    if (!r.call_id) return false;
     const t = (r.call_transcript || '').trim();
-    return r.call_id && t && t !== '[]';
+    if (!t || t === '[]') return false;
+    withTranscript++;
+    if (!hasMeaningfulConversation(r.call_answered, t)) {
+      skippedNoSignal++;
+      return false;
+    }
+    return true;
   });
-  console.log(`  ${targets.length} transcript-bearing rows`);
+  console.log(`  ${withTranscript} with any transcript`);
+  console.log(`  ${skippedNoSignal} skipped (unanswered / dropped / no user content)`);
+  console.log(`  ${targets.length} embedding-worthy rows`);
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   let embedded = 0;

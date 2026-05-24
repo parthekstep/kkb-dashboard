@@ -36,6 +36,34 @@ const TRANSCRIPT_EMBED_CAP = 24000;
 // other fields total ~500 chars, so 16k chars of preview is comfortably safe.
 const TRANSCRIPT_PREVIEW_CAP = 16000;
 
+// Minimum total user-spoken characters to consider a call worth embedding.
+// Anything below this is essentially a "hello → bot greeting → user dropped"
+// pattern with no signal worth retrieving on later.
+const MIN_USER_CHARS = 30;
+
+/**
+ * Returns true iff this call has enough user-spoken content to be worth
+ * embedding. Used to skip unanswered/dropped/empty calls so we don't pollute
+ * the Pinecone index with vectors that all look like generic bot greetings.
+ *
+ * Accepts either a parsed transcript array OR a raw JSON string.
+ */
+export function hasMeaningfulConversation(callAnswered, transcript) {
+  if (String(callAnswered ?? '').toLowerCase() !== 'yes') return false;
+  let arr = transcript;
+  if (typeof transcript === 'string') {
+    try { arr = JSON.parse(transcript); } catch { return false; }
+  }
+  if (!Array.isArray(arr)) return false;
+  const userChars = arr
+    .filter((m) => m?.role === 'user')
+    .map((m) => String(m.content || ''))
+    .join('')
+    .trim()
+    .length;
+  return userChars >= MIN_USER_CHARS;
+}
+
 export function buildEmbedText(c) {
   const transcript = String(c.transcript_text || '').slice(0, TRANSCRIPT_EMBED_CAP);
   return [
@@ -78,6 +106,25 @@ async function embedText(openai, text) {
 
 export async function embedTranscript(callData) {
   if (!callData?.call_id) throw new Error('embedTranscript: call_id required');
+
+  // Skip calls with no meaningful user content (unanswered, dropped, or just
+  // a greeting). These would all embed to similar generic vectors and pollute
+  // retrieval. callData.transcript_text is already the role-prefixed string
+  // built by extractMetrics.js, so we check user-char count on it directly.
+  const userChars = String(callData.transcript_text || '')
+    .split('\n')
+    .filter((line) => line.startsWith('user:'))
+    .map((line) => line.slice(5).trim())
+    .join(' ')
+    .length;
+  if (
+    String(callData.call_answered ?? '').toLowerCase() !== 'yes' ||
+    userChars < MIN_USER_CHARS
+  ) {
+    console.log(`Skipping embed for ${callData.call_id} — no meaningful user content`);
+    return;
+  }
+
   const namespace = process.env.PINECONE_NAMESPACE || 'kkb';
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
