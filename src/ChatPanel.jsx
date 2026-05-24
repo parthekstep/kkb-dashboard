@@ -51,15 +51,46 @@ function LoadingDots() {
   );
 }
 
+function stripMarkdown(s) {
+  return String(s)
+    // bold/italic: **text** __text__ *text* _text_
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/(^|[^\*])\*(?!\s)([^*\n]+?)\*(?!\*)/g, "$1$2")
+    .replace(/(^|[^_])_(?!\s)([^_\n]+?)_(?!_)/g, "$1$2")
+    // headings, bullets, blockquotes at line start
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    // inline code
+    .replace(/`([^`\n]+)`/g, "$1");
+}
+
+function formatPhone(raw) {
+  const s = String(raw || "").replace(/\D/g, "");
+  if (!s) return "—";
+  // 12-digit "91xxxxxxxxxx" → "+91 xxxxx xxxxx", else show last 10 digits raw.
+  if (s.length === 12 && s.startsWith("91")) return `+91 ${s.slice(2, 7)} ${s.slice(7)}`;
+  if (s.length === 10) return `${s.slice(0, 5)} ${s.slice(5)}`;
+  return s;
+}
+
 function SourceChip({ src }) {
-  const date = (src.call_datetime_ist || "").slice(0, 10) || "—";
-  const topic = src.primary_topic || "—";
+  const phone = formatPhone(src.phone);
+  const date = (src.call_datetime_ist || "").slice(0, 10);
+  const tooltip = [
+    src.call_id ? `Call: ${src.call_id}` : null,
+    src.primary_topic ? `Topic: ${src.primary_topic}` : null,
+    typeof src.score === "number" ? `Relevance: ${src.score.toFixed(2)}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
   return (
     <span
-      title={src.call_id}
+      title={tooltip}
       className="inline-block bg-gray-100 text-gray-700 text-xs px-2 py-0.5 rounded border border-gray-200"
     >
-      {date} · {topic}
+      {phone}{date ? ` · ${date}` : ""}
     </span>
   );
 }
@@ -98,7 +129,8 @@ export default function ChatPanel({ errorBadgeCount = 0 }) {
         ...m,
         {
           role: "assistant",
-          content: data.answer,
+          // Safety net: strip residual markdown the LLM might emit despite the prompt.
+          content: stripMarkdown(data.answer || ""),
           sources: data.top_matches ?? [],
           question_type: data.question_type,
           sources_used: data.sources_used,
@@ -207,7 +239,7 @@ export default function ChatPanel({ errorBadgeCount = 0 }) {
                     )}
                     {!m.isError && Array.isArray(m.sources) && m.sources.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-1 px-1">
-                        {m.sources.slice(0, 3).map((s, j) => (
+                        {m.sources.slice(0, 5).map((s, j) => (
                           <SourceChip key={j} src={s} />
                         ))}
                       </div>

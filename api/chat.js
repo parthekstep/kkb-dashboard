@@ -70,13 +70,21 @@ Excerpt: ${md.transcript_preview || '(none)'}`;
     .join('\n\n');
 }
 
+const FORMAT_RULES = `
+FORMATTING RULES (strict):
+- Plain text only. No Markdown. No **bold**, no *italics*, no ### headings, no - bullet lists, no backticks.
+- If you need a list, write it as numbered lines: "1. foo\\n2. bar".
+- Use blank lines for paragraph breaks.
+- Never wrap quotes in asterisks; use plain quotation marks.
+`;
+
 const QUAL_PROMPT = (count, ctx) =>
 `You are an analyst for "Kaam Ki Baat", a voice AI that helps Indian blue-collar workers find jobs in Hindi and Kannada.
 
 You have access to summaries and excerpts from the ${count} most relevant recent call transcripts. Answer based only on what is present in these transcripts. If the transcripts don't contain enough information, say so clearly. Do not invent patterns.
 
-Be specific — reference what callers actually said or did when relevant. Keep the answer under 200 words but make it insightful.
-
+Be specific — reference what callers actually said or did when relevant. Keep the answer under 250 words but make it insightful.
+${FORMAT_RULES}
 TRANSCRIPT CONTEXT:
 ${ctx}`;
 
@@ -84,7 +92,7 @@ const QUANT_PROMPT = (ctx) =>
 `You are an analyst for "Kaam Ki Baat", a voice AI that helps Indian blue-collar workers find jobs.
 
 This is a counting or metrics question. For exact numbers, direct the user to use the dashboard filters which have complete data. Use the transcript context below to add qualitative colour to the numbers.
-
+${FORMAT_RULES}
 TRANSCRIPT CONTEXT:
 ${ctx}`;
 
@@ -117,18 +125,25 @@ export default async function handler(req, res) {
     });
     const qVector = embedRes.data[0].embedding;
 
-    // 3. Query Pinecone
+    // 3. Query Pinecone — pull the full namespace's worth of candidates so we
+    //    don't artificially cap what the LLM can reason over. We then filter
+    //    by score (drops obvious irrelevants) and cap by token budget.
     const queryRes = await pineconeQuery({
       vector: qVector,
-      topK: 20,
+      topK: 100,
       namespace,
       includeMetadata: true,
     });
-    const matches = queryRes.matches ?? [];
+    const allMatches = queryRes.matches ?? [];
 
-    // 4. Slice context window
-    const N = isQuant ? 10 : 15;
-    const ctxMatches = matches.slice(0, N);
+    // 4. Filter by relevance score, then cap by count. gpt-4o-mini has a 128k
+    //    context; each preview is ~4k chars (~1k tokens) + ~200 chars of
+    //    summary, so 50 matches ≈ 60k tokens of context. Plenty of headroom.
+    const SCORE_THRESHOLD = 0.25;        // anything below is barely related
+    const MAX_FOR_LLM = isQuant ? 30 : 50;
+    const ctxMatches = allMatches
+      .filter((m) => (m.score ?? 0) >= SCORE_THRESHOLD)
+      .slice(0, MAX_FOR_LLM);
     const ctx = ctxMatches.length ? formatContext(ctxMatches) : '(no relevant transcripts found)';
 
     // 5. Answer
@@ -146,8 +161,9 @@ export default async function handler(req, res) {
       answer,
       question_type: cls.type,
       sources_used: ctxMatches.length,
-      top_matches: ctxMatches.slice(0, 3).map((m) => ({
+      top_matches: ctxMatches.slice(0, 5).map((m) => ({
         call_id: m.metadata?.call_id ?? m.id,
+        phone: m.metadata?.phone ?? '',
         call_datetime_ist: m.metadata?.call_datetime_ist ?? '',
         primary_topic: m.metadata?.primary_topic ?? '',
         score: m.score,
