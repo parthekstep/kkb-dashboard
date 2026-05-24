@@ -31,7 +31,10 @@ const EMBED_DIMENSIONS = 1024;
 //     quoting. Pinecone metadata caps at 40 KB per vector across all fields;
 //     4 KB keeps us well under that with room for everything else.
 const TRANSCRIPT_EMBED_CAP = 24000;
-const TRANSCRIPT_PREVIEW_CAP = 4000;
+// Bigger preview = more transcript text the chat LLM can quote for matched
+// calls. Pinecone metadata caps at 40 KB per vector across ALL fields; our
+// other fields total ~500 chars, so 16k chars of preview is comfortably safe.
+const TRANSCRIPT_PREVIEW_CAP = 16000;
 
 export function buildEmbedText(c) {
   const transcript = String(c.transcript_text || '').slice(0, TRANSCRIPT_EMBED_CAP);

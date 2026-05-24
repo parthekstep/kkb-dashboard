@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 const STARTER_PROMPTS = [
+  "Give me a summary of the main themes across recent calls",
   "Why are callers not applying to jobs?",
-  "What happens when jobs are shown but not applied to?",
-  "What languages are callers using and does it affect outcomes?",
+  "What objections come up most often?",
   "What are the most common reasons calls end early?",
 ];
 
