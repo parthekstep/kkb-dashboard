@@ -1,0 +1,106 @@
+/**
+ * Embeds a single call's structured summary into Pinecone, tracks it in the
+ * EmbedManifest sheet, and enforces a rolling-window cap (FIFO eviction).
+ *
+ * Designed to be called from extractMetrics.js AFTER the row has been appended
+ * to Sheet1. Caller wraps in try/catch — embed failures are NEVER fatal to the
+ * webhook pipeline.
+ *
+ * Also exports `buildEmbedText` so scripts/bulk-embed.js stays in sync.
+ */
+
+import OpenAI from 'openai';
+import { pineconeUpsert, pineconeDelete } from './pinecone.js';
+import {
+  appendEmbedManifest,
+  readEmbedManifest,
+  deleteEmbedManifestRows,
+} from './sheets.js';
+
+const EMBED_MODEL = 'text-embedding-3-small'; // 1536-dim
+
+export function buildEmbedText(c) {
+  const transcript = String(c.transcript_text || '').slice(0, 2000);
+  return [
+    `Call ID: ${c.call_id}`,
+    `Date: ${c.call_datetime_ist}`,
+    `Language: ${c.call_language}`,
+    `Topic: ${c.primary_topic}`,
+    `Answered: ${c.call_answered}  Engaged: ${c.call_engaged}`,
+    `Jobs Shown: ${c.jobs_shown}   Applied: ${c.applied_to_job}`,
+    `Summary (3-line): ${c.summary_3line ?? ''}`,
+    `Bolna summary: ${c.call_output_summary || '(none)'}`,
+    `Transcript: ${transcript}`,
+  ].join('\n');
+}
+
+function buildMetadata(c) {
+  return {
+    call_id: String(c.call_id ?? ''),
+    phone: String(c.phone ?? ''),
+    call_datetime_ist: String(c.call_datetime_ist ?? ''),
+    primary_topic: String(c.primary_topic ?? ''),
+    call_language: String(c.call_language ?? ''),
+    call_answered: String(c.call_answered ?? ''),
+    call_engaged: String(c.call_engaged ?? ''),
+    applied_to_job: String(c.applied_to_job ?? ''),
+    jobs_shown: String(c.jobs_shown ?? ''),
+    final_summary: String(c.summary_3line ?? ''),
+    transcript_preview: String(c.transcript_text || '').slice(0, 500),
+  };
+}
+
+async function embedText(openai, text) {
+  const res = await openai.embeddings.create({ model: EMBED_MODEL, input: text });
+  return res.data[0].embedding;
+}
+
+export async function embedTranscript(callData) {
+  if (!callData?.call_id) throw new Error('embedTranscript: call_id required');
+  const namespace = process.env.PINECONE_NAMESPACE || 'kkb';
+
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const text = buildEmbedText(callData);
+  const values = await embedText(openai, text);
+
+  await pineconeUpsert(
+    [{ id: String(callData.call_id), values, metadata: buildMetadata(callData) }],
+    namespace
+  );
+
+  // Manifest append + rolling-window are best-effort: a failure here MUST NOT
+  // undo the upsert. We log and continue; the next embed will retry eviction.
+  try {
+    await appendEmbedManifest(callData.call_id, callData.call_datetime_ist, namespace);
+  } catch (e) {
+    console.error('appendEmbedManifest failed (non-fatal):', e?.message);
+  }
+  try {
+    await enforceRollingWindow(namespace, 200);
+  } catch (e) {
+    console.error('enforceRollingWindow failed (non-fatal):', e?.message);
+  }
+}
+
+export async function enforceRollingWindow(namespace, limit) {
+  const rows = await readEmbedManifest(namespace);
+  if (rows.length <= limit) return;
+
+  // Sort ascending by call_datetime_ist; oldest first.
+  // Manifest stores strings like "YYYY-MM-DD HH:MM:SS" so lexicographic sort
+  // matches chronological order. Rows with blank/invalid dates sort to the top
+  // (treated as oldest) and get evicted first — desired behaviour.
+  rows.sort((a, b) => (a.call_datetime_ist || '').localeCompare(b.call_datetime_ist || ''));
+
+  const overage = rows.length - limit;
+  const victims = rows.slice(0, overage);
+  const ids = victims.map((r) => String(r.call_id));
+  const rowIndices = victims.map((r) => r.rowIndex);
+
+  await pineconeDelete(ids, namespace);
+  await deleteEmbedManifestRows(rowIndices);
+
+  console.log(
+    `Rolling window: deleted ${overage} oldest vectors. ${namespace} namespace now has ${limit}.`
+  );
+}

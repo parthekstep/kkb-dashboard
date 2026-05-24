@@ -81,6 +81,59 @@ export async function deleteErrorRowByIndex(rowIndex1Based) {
   });
 }
 
+// ── EmbedManifest helpers ────────────────────────────────────────────────────
+// Source of truth for which call_ids are currently embedded in Pinecone (free
+// tier doesn't expose listing). One row per embedded call:
+//   call_id | call_datetime_ist | namespace
+// Tab must be created manually with that header — see README.
+
+export async function appendEmbedManifest(call_id, call_datetime_ist, namespace) {
+  const sheets = getSheetsClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: process.env.SPREADSHEET_ID,
+    range: 'EmbedManifest!A:C',
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [[call_id, call_datetime_ist, namespace]] },
+  });
+}
+
+export async function readEmbedManifest(namespace) {
+  const sheets = getSheetsClient();
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: process.env.SPREADSHEET_ID,
+    range: 'EmbedManifest!A2:C',
+  });
+  return (data.values ?? [])
+    .map((r, i) => ({
+      call_id: r[0],
+      call_datetime_ist: r[1],
+      namespace: r[2],
+      rowIndex: i + 2, // +2 = 1-based + skip header
+    }))
+    .filter((r) => r.namespace === namespace && r.call_id);
+}
+
+export async function deleteEmbedManifestRows(rowIndices1Based) {
+  if (!rowIndices1Based.length) return;
+  const sheets = getSheetsClient();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: process.env.SPREADSHEET_ID });
+  const tab = meta.data.sheets.find((s) => s.properties.title === 'EmbedManifest');
+  if (!tab) throw new Error('EmbedManifest tab not found');
+  const sheetId = tab.properties.sheetId;
+  // Delete bottom-up so earlier deletes don't shift later indices.
+  const sorted = [...rowIndices1Based].sort((a, b) => b - a);
+  const requests = sorted.map((idx) => ({
+    deleteDimension: {
+      range: { sheetId, dimension: 'ROWS', startIndex: idx - 1, endIndex: idx },
+    },
+  }));
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: process.env.SPREADSHEET_ID,
+    requestBody: { requests },
+  });
+}
+
 function istTimestamp() {
   const d = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
   return d.toISOString().replace('T', ' ').slice(0, 19);

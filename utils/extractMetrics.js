@@ -140,4 +140,26 @@ export async function taskA_metrics(payload) {
   ];
 
   await appendCallRecord(row);
+
+  // Embed into Pinecone for the dashboard chatbot. Non-fatal — a failure here
+  // must never break the webhook pipeline (Sheet1 row is already saved above).
+  try {
+    const { embedTranscript } = await import('./embed.js');
+    await embedTranscript({
+      call_id: m.call_id,
+      phone: m.phone,
+      transcript_text,
+      summary_3line: m.summary_3line,
+      call_output_summary: body?.call_output?.summary ?? '',
+      call_datetime_ist: m.call_datetime_ist,
+      primary_topic: m.primary_topic,
+      call_language: m.call_language,
+      call_answered: m.call_answered,
+      call_engaged: m.call_engaged,
+      applied_to_job: m.applied_to_job,
+      jobs_shown: m.jobs_shown,
+    });
+  } catch (e) {
+    console.error('embedTranscript failed (non-fatal):', e?.message);
+  }
 }

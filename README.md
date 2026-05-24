@@ -48,3 +48,25 @@ Endpoints:
    `timestamp_ist | call_id | phone | task | error_message | stack_trace | retry_attempted | retry_succeeded`
 
 6. **Share the spreadsheet** with the service-account email (Editor access).
+
+## Chatbot setup (transcript-aware RAG)
+
+The dashboard has a floating "KKB Analyst" chat panel that queries a Pinecone
+vector store of recent transcripts. Setup:
+
+1. **Add Pinecone env vars** (Vercel + local `.env.local`):
+   - `PINECONE_API_KEY`
+   - `PINECONE_INDEX_HOST` (e.g. `https://kkb-dkb-transcripts-3am8ycn.svc.aped-4627-b74a.pinecone.io`)
+   - `PINECONE_NAMESPACE=kkb`
+
+2. **Create the `EmbedManifest` tab** in the spreadsheet (exact name: `EmbedManifest`)
+   with header row: `call_id | call_datetime_ist | namespace`. The code manages
+   all rows automatically after that.
+
+3. **Backfill existing transcripts** (one-shot, idempotent):
+   ```bash
+   node --env-file=.env.local scripts/bulk-embed.js
+   ```
+   Caps at 200 vectors per namespace (Pinecone free-tier rolling window).
+
+After setup, every new webhook call automatically embeds + upserts + evicts.

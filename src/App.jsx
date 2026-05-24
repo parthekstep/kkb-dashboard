@@ -5,6 +5,7 @@ import {
   PieChart, Pie, Cell, Legend,
 } from "recharts";
 import ErrorsTab, { computeErrorBadge } from "./ErrorsTab.jsx";
+import ChatPanel from "./ChatPanel.jsx";
 
 const CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vS0I-yVy4ae2MvmSq44r2kFJNc-5lpcX4395tXu9hzplrgfVJ2U5CvC1FS0NAXQtM56w7I8tAnKjZIL/pub?gid=0&single=true&output=csv";
@@ -318,6 +319,8 @@ export default function App() {
           />
         )}
       </main>
+
+      <ChatPanel errorBadgeCount={errorBadgeCount} />
     </div>
   );
 }
