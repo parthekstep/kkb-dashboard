@@ -17,6 +17,7 @@ const PIE_COLORS = ["#1F3864", "#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#8B5
 
 const DROP_REASON_LABELS = {
   silent_user: "User went silent",
+  early_hangup: "Brief interest, then hung up",
   bot_didnt_understand: "Bot couldn't understand user",
   profile_collection_loop: "Stuck collecting profile",
   no_matching_jobs: "No matching jobs found",

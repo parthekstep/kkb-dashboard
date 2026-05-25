@@ -82,6 +82,7 @@ const extractionSchema = {
       enum: [
         null,
         'silent_user',
+        'early_hangup',
         'bot_didnt_understand',
         'profile_collection_loop',
         'no_matching_jobs',
@@ -114,7 +115,8 @@ RULES:
 3. applied_to_job — Yes if application was CONFIRMED submitted (bot said "apply ho gaya", "application submitted" or equivalent)
 4. tried_to_apply — FAILED apply attempts only. Yes ONLY when BOTH: (i) user consented OR bot invoked apply tool, AND (ii) the application did NOT confirm successfully. If applied_to_job=Yes, this MUST be No. If user never consented and no apply tool was invoked, this is No.
 10. drop_reason — dominant reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick ONE:
-    - "silent_user" (≤5 words user said, just greeting then disengaged),
+    - "silent_user" (user said ≤3 words; essentially just answered the phone),
+    - "early_hangup" (user briefly expressed interest but call ended <30s before any progression),
     - "bot_didnt_understand" (bot repeatedly asked to repeat / parsing failure),
     - "profile_collection_loop" (stuck collecting name/age/location, user gave up),
     - "no_matching_jobs" (jobs shown but user rejected for salary/location/skill mismatch),

@@ -46,6 +46,7 @@ const schema = {
       enum: [
         null,
         'silent_user',
+        'early_hangup',
         'bot_didnt_understand',
         'profile_collection_loop',
         'no_matching_jobs',
@@ -83,7 +84,8 @@ Extract three fields:
    If applied_to_job=Yes, this MUST be No. If the user never consented and no apply tool was invoked, this is No.
 
 3. drop_reason — the DOMINANT reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick ONE bucket:
-   - "silent_user" — user said ≤5 words total, basically just greeting then disengaged. No real conversation.
+   - "silent_user" — user said almost nothing (≤3 words); essentially just answered the phone. No engagement signal.
+   - "early_hangup" — user briefly expressed interest ("yes, jobs", "haan kaam chahiye", "tell me more") but the call ended very early (typically <30s) before the bot could collect profile, show jobs, or progress meaningfully. The conversation barely started.
    - "bot_didnt_understand" — bot repeatedly asked the user to repeat / "I didn't catch that" / responded with non-sequiturs because it couldn't parse the user's Hindi/Kannada speech.
    - "profile_collection_loop" — bot got stuck asking for name/age/location/qualification; user disengaged before any job was discussed.
    - "no_matching_jobs" — bot DID show jobs (jobs_shown=Yes is a strong hint) but none fit the user's stated preference (wrong location, salary too low, wrong skill / job type). User rejected the shown jobs.

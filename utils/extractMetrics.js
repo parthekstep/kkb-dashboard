@@ -32,6 +32,7 @@ const metricsSchema = {
       enum: [
         null,
         'silent_user',
+        'early_hangup',
         'bot_didnt_understand',
         'profile_collection_loop',
         'no_matching_jobs',
@@ -78,7 +79,8 @@ RULES:
 12. summary_3line — a concise 3-line plain-English summary FROM THE USER'S POINT OF VIEW. Line 1: the user's overall response/engagement (interested, disengaged, confused, hung up, etc.). Line 2: key actions the user took (asked for jobs in X city, agreed to apply for job Y, gave their name/age, etc.). Line 3: key failures or unresolved issues from the user's perspective (couldn't find jobs they wanted, apply failed, bot didn't understand them, call dropped, etc. — or "None" if the call went smoothly). Use \\n as separator. If no conversation, return "Call not answered."
 13. tried_to_apply — This column now tracks FAILED apply attempts only. Yes ONLY when BOTH are true: (i) the user explicitly consented to apply OR the bot invoked the apply_jobs tool, AND (ii) the application did NOT confirm successfully (no "अप्लाई हो गया है" / "apply ho gaya" / "application submitted" from the bot, OR the bot acknowledged an error from the tool). If applied_to_job=Yes, this MUST be No. If the user never consented and no apply tool was invoked, this is No. If jobs_shown=No this is almost always No.
 14. drop_reason — categorise the DOMINANT reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick the ONE bucket that best describes the dropoff:
-    - "silent_user" — user said ≤5 words total; basically just greeting then disengaged. No real conversation.
+    - "silent_user" — user said almost nothing (≤3 words); essentially just answered the phone. No engagement signal.
+    - "early_hangup" — user briefly expressed interest ("yes, jobs", "haan kaam chahiye", "tell me more") but the call ended very early (typically <30s) before the bot could collect profile, show jobs, or do anything else. The conversation barely started.
     - "bot_didnt_understand" — bot repeatedly asked the user to repeat / "I didn't catch that" / responded with non-sequiturs because it couldn't parse the user's Hindi/Kannada speech.
     - "profile_collection_loop" — bot got stuck asking for the user's name, age, location, qualification, etc.; user disengaged before any job was actually discussed.
     - "no_matching_jobs" — bot DID show jobs but none fit the user's stated preference (wrong location, salary too low, wrong skill / job type, etc.). User rejected the shown jobs.
