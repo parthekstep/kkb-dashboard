@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 const STARTER_PROMPTS = [
-  "Give me a summary of the main themes across recent calls",
-  "Why are callers not applying to jobs?",
-  "What objections come up most often?",
-  "What are the most common reasons calls end early?",
+  "How often does the bot fail to understand callers?",
+  "What % of calls mention salary or money?",
+  "What are the main reasons callers don't apply?",
+  "What are the most common topics that come up?",
 ];
 
 function ChatIcon({ className = "" }) {
@@ -250,7 +250,7 @@ export default function ChatPanel({ errorBadgeCount = 0 }) {
               {isLoading && (
                 <div className="self-start max-w-[90%]">
                   <div className="bg-white border border-[#E5E7EB] text-gray-700 text-sm rounded-2xl rounded-bl-sm px-3 py-2">
-                    Analysing transcripts
+                    Analysing 200 transcripts
                     <LoadingDots />
                   </div>
                 </div>
