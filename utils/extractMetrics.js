@@ -24,11 +24,29 @@ const metricsSchema = {
     },
     summary_3line: { type: 'string' },
     tried_to_apply: { type: 'string', enum: ['Yes', 'No'] },
+    // drop_reason is populated ONLY when call_answered=Yes AND applied_to_job=No.
+    // For successful applications or unanswered calls, the model emits null
+    // (strict mode requires the field present even when null).
+    drop_reason: {
+      type: ['string', 'null'],
+      enum: [
+        null,
+        'silent_user',
+        'bot_didnt_understand',
+        'profile_collection_loop',
+        'no_matching_jobs',
+        'apply_failed',
+        'user_declined',
+        'language_mismatch',
+        'other',
+      ],
+    },
   },
   required: [
     'call_id', 'phone', 'call_duration_seconds', 'call_datetime_ist',
     'call_answered', 'call_engaged', 'applied_to_job', 'applications_count',
     'jobs_shown', 'primary_topic', 'call_language', 'summary_3line', 'tried_to_apply',
+    'drop_reason',
   ],
 };
 
@@ -59,6 +77,16 @@ RULES:
 11. call_language — one of the 4 allowed values
 12. summary_3line — a concise 3-line plain-English summary FROM THE USER'S POINT OF VIEW. Line 1: the user's overall response/engagement (interested, disengaged, confused, hung up, etc.). Line 2: key actions the user took (asked for jobs in X city, agreed to apply for job Y, gave their name/age, etc.). Line 3: key failures or unresolved issues from the user's perspective (couldn't find jobs they wanted, apply failed, bot didn't understand them, call dropped, etc. — or "None" if the call went smoothly). Use \\n as separator. If no conversation, return "Call not answered."
 13. tried_to_apply — This column now tracks FAILED apply attempts only. Yes ONLY when BOTH are true: (i) the user explicitly consented to apply OR the bot invoked the apply_jobs tool, AND (ii) the application did NOT confirm successfully (no "अप्लाई हो गया है" / "apply ho gaya" / "application submitted" from the bot, OR the bot acknowledged an error from the tool). If applied_to_job=Yes, this MUST be No. If the user never consented and no apply tool was invoked, this is No. If jobs_shown=No this is almost always No.
+14. drop_reason — categorise the DOMINANT reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick the ONE bucket that best describes the dropoff:
+    - "silent_user" — user said ≤5 words total; basically just greeting then disengaged. No real conversation.
+    - "bot_didnt_understand" — bot repeatedly asked the user to repeat / "I didn't catch that" / responded with non-sequiturs because it couldn't parse the user's Hindi/Kannada speech.
+    - "profile_collection_loop" — bot got stuck asking for the user's name, age, location, qualification, etc.; user disengaged before any job was actually discussed.
+    - "no_matching_jobs" — bot DID show jobs but none fit the user's stated preference (wrong location, salary too low, wrong skill / job type, etc.). User rejected the shown jobs.
+    - "apply_failed" — same population as tried_to_apply=Yes: user consented to apply OR bot invoked the apply tool, but the application did not confirm successfully.
+    - "user_declined" — user engaged but explicitly refused ("not looking for work", "no", "abhi nahi", "ಬೇಡ"). They actually said no — distinct from silent_user where they said nothing.
+    - "language_mismatch" — user wanted a language different from what the bot was speaking, or spoke a language (Telugu, Marathi, English-only) the bot couldn't handle.
+    - "other" — none of the above fits. Use sparingly.
+    Pick the dominant reason when multiple apply (e.g. a call that started with profile collection but ended on no_matching_jobs gets "no_matching_jobs").
 
 Output valid JSON only.`;
 }
@@ -137,6 +165,7 @@ export async function taskA_metrics(payload) {
     m.summary_3line,             // 18  final_summary
     raw_transcript,              // 19  call_transcript
     m.tried_to_apply,            // 20  tried_to_apply
+    m.drop_reason ?? '',         // 21  drop_reason (empty when null)
   ];
 
   await appendCallRecord(row);

@@ -77,10 +77,25 @@ const extractionSchema = {
     call_language: { type: 'string', enum: ['Hindi', 'Kannada', 'English', 'Unknown'] },
     summary_3line: { type: 'string' },
     tried_to_apply: { type: 'string', enum: ['Yes', 'No'] },
+    drop_reason: {
+      type: ['string', 'null'],
+      enum: [
+        null,
+        'silent_user',
+        'bot_didnt_understand',
+        'profile_collection_loop',
+        'no_matching_jobs',
+        'apply_failed',
+        'user_declined',
+        'language_mismatch',
+        'other',
+      ],
+    },
   },
   required: [
     'call_answered', 'call_engaged', 'applied_to_job', 'applications_count',
     'jobs_shown', 'primary_topic', 'call_language', 'summary_3line', 'tried_to_apply',
+    'drop_reason',
   ],
 };
 
@@ -98,6 +113,16 @@ RULES:
 2. call_engaged — Yes only if call_answered=Yes AND duration > 10 seconds
 3. applied_to_job — Yes if application was CONFIRMED submitted (bot said "apply ho gaya", "application submitted" or equivalent)
 4. tried_to_apply — FAILED apply attempts only. Yes ONLY when BOTH: (i) user consented OR bot invoked apply tool, AND (ii) the application did NOT confirm successfully. If applied_to_job=Yes, this MUST be No. If user never consented and no apply tool was invoked, this is No.
+10. drop_reason — dominant reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick ONE:
+    - "silent_user" (≤5 words user said, just greeting then disengaged),
+    - "bot_didnt_understand" (bot repeatedly asked to repeat / parsing failure),
+    - "profile_collection_loop" (stuck collecting name/age/location, user gave up),
+    - "no_matching_jobs" (jobs shown but user rejected for salary/location/skill mismatch),
+    - "apply_failed" (consented OR apply tool fired, but no success confirmation — same population as tried_to_apply=Yes),
+    - "user_declined" (engaged but explicitly refused: "not looking", "no", "abhi nahi", "ಬೇಡ"),
+    - "language_mismatch" (user wanted Telugu/Marathi/etc. the bot doesn't speak, or bot's language was wrong),
+    - "other" (use sparingly).
+    Pick the DOMINANT reason when multiple apply.
 5. applications_count — count of confirmed successful applications, default 0
 6. jobs_shown — Yes if bot presented a list of jobs to the user
 7. primary_topic — one of the 5 allowed values
@@ -125,6 +150,7 @@ async function extractFromTranscript(row, campaignLanguage) {
       call_language: campaignLanguage,
       summary_3line: answered === 'Yes' ? 'Call answered but no transcript available.\n—\n—' : 'Call not answered.',
       tried_to_apply: 'No',
+      drop_reason: answered === 'Yes' ? 'silent_user' : null,
     };
   }
 
@@ -219,6 +245,7 @@ function buildRow(raw, extracted, campaignType, language) {
     extracted.summary_3line,              // 18 final_summary
     raw_transcript,                       // 19 call_transcript
     extracted.tried_to_apply,            // 20 tried_to_apply
+    extracted.drop_reason ?? '',         // 21 drop_reason
   ];
 }
 
@@ -229,7 +256,7 @@ async function appendToSheet(sheets, rows) {
     const chunk = rows.slice(i, i + SHEET_CHUNK);
     await sheets.spreadsheets.values.append({
       spreadsheetId: sid,
-      range: 'Sheet1!A:T',
+      range: 'Sheet1!A:U',
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: chunk },
@@ -303,6 +330,7 @@ async function main() {
           call_language: language,
           summary_3line: `Extraction failed: ${e.message.slice(0, 60)}`,
           tried_to_apply: 'No',
+          drop_reason: 'other',
         };
         return buildRow(row, extracted, campaignType, language);
       }

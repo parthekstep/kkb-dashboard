@@ -15,6 +15,17 @@ const ERRORS_CSV_URL =
 
 const PIE_COLORS = ["#1F3864", "#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#8B5CF6"];
 
+const DROP_REASON_LABELS = {
+  silent_user: "User went silent",
+  bot_didnt_understand: "Bot couldn't understand user",
+  profile_collection_loop: "Stuck collecting profile",
+  no_matching_jobs: "No matching jobs found",
+  apply_failed: "Apply attempt failed",
+  user_declined: "User declined",
+  language_mismatch: "Language mismatch",
+  other: "Other",
+};
+
 const yesNo = (v) => String(v ?? "").trim().toLowerCase() === "yes";
 const fmtPct = (n) => (Number.isFinite(n) ? n.toFixed(1) : "0.0") + "%";
 const fmtNum = (n) => Number(n || 0).toLocaleString("en-IN");
@@ -88,6 +99,23 @@ function computeMetrics(rows) {
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, count]) => ({ date, count }));
 
+  // Drop reasons. Populated only for answered, non-applied calls.
+  const dropReasonCounts = {};
+  for (const r of rows) {
+    const dr = String(r.drop_reason || "").trim();
+    if (!dr) continue;
+    dropReasonCounts[dr] = (dropReasonCounts[dr] || 0) + 1;
+  }
+  const dropReasonTotal = Object.values(dropReasonCounts).reduce((a, b) => a + b, 0);
+  const dropReasons = Object.entries(dropReasonCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => ({
+      key,
+      label: DROP_REASON_LABELS[key] || key,
+      count,
+      pct: dropReasonTotal > 0 ? (count / dropReasonTotal) * 100 : 0,
+    }));
+
   return {
     totalJobSeekersCalled: byPhone.size,
     totalJobSeekersAnswered: seekersAnswered,
@@ -115,6 +143,8 @@ function computeMetrics(rows) {
     topicBreakdown,
     languageBreakdown,
     callsByDay,
+    dropReasons,
+    dropReasonTotal,
   };
 }
 
@@ -570,6 +600,67 @@ function DashboardContent({
               )}
             </div>
           </div>
+        </section>
+
+        <section className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-lg font-semibold text-[#1F3864]">Drop Reasons</h2>
+            <span className="text-xs text-gray-500">
+              Among answered calls that did not apply
+              {metrics.dropReasonTotal > 0 ? ` (n = ${fmtNum(metrics.dropReasonTotal)})` : ""}
+            </span>
+          </div>
+          {loading ? (
+            <div className="bg-[#F8F9FA] rounded-lg p-6 space-y-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-8 bg-gray-200 rounded animate-pulse" />
+              ))}
+            </div>
+          ) : metrics.dropReasons.length === 0 ? (
+            <div className="bg-[#F8F9FA] rounded-lg p-8 text-center text-sm text-gray-500">
+              No drop reasons recorded yet. Add the <code>drop_reason</code>{" "}
+              column to Sheet1 and run the re-extract script.
+            </div>
+          ) : (
+            <div className="bg-[#F8F9FA] rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-white border-b border-gray-200">
+                  <tr className="text-left text-xs font-medium text-gray-600 uppercase">
+                    <th className="px-4 py-3 w-1/3">Reason</th>
+                    <th className="px-4 py-3 w-20 text-right">Count</th>
+                    <th className="px-4 py-3 w-20 text-right">%</th>
+                    <th className="px-4 py-3">Share</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metrics.dropReasons.map((d) => (
+                    <tr
+                      key={d.key}
+                      className="border-b border-gray-200 last:border-0 hover:bg-white/60"
+                    >
+                      <td className="px-4 py-3 text-gray-800 font-medium">
+                        {d.label}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-700 tabular-nums">
+                        {fmtNum(d.count)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-700 tabular-nums">
+                        {d.pct.toFixed(1)}%
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[#1F3864]"
+                            style={{ width: `${Math.max(2, d.pct)}%` }}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
     </>
   );
