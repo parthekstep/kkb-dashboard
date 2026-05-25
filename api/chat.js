@@ -279,8 +279,11 @@ FORMATTING RULES (strict):
 async function runReduce(openai, question, mapResults, totalCorpus) {
   const totalMatching = mapResults.reduce((s, r) => s + (r.count_matching || 0), 0);
   const allExamples = mapResults.flatMap((r) => r.examples || []);
+  // Anonymised observation list — no "Subset N" labels. We keep the per-observation
+  // count_matching / subset_size as a relevance signal (common vs niche pattern)
+  // but never expose chunk identity to the reducer.
   const themeBullets = mapResults
-    .map((r, i) => `Subset ${i + 1} (${r.subset_size} calls, ${r.count_matching} matching): ${r.theme_notes}`)
+    .map((r) => `- (${r.count_matching} of ${r.subset_size} relevant) ${r.theme_notes}`)
     .join('\n');
   const examplesBlock = allExamples
     .slice(0, 25) // give the reducer plenty to pick from
@@ -290,20 +293,22 @@ async function runReduce(openai, question, mapResults, totalCorpus) {
   const system =
 `You are an analyst for "Kaam Ki Baat", a voice AI that helps Indian blue-collar workers find jobs in Hindi and Kannada.
 
-The corpus was split into ${mapResults.length} subsets totalling ${totalCorpus} calls. Each subset was analysed separately. You now aggregate.
+You are aggregating observations gathered across ${totalCorpus} call transcripts.
 
 INSTRUCTIONS:
-- If the question implies a count or rate, give the aggregate as "X of the ${totalCorpus} calls (~Y%)" using the pre-computed total of ${totalMatching} matching calls. Do NOT re-count from the examples — trust the subset counts.
+- If the question implies a count or rate, give the aggregate as "X of the ${totalCorpus} calls (~Y%)" using the pre-computed total of ${totalMatching} matching calls. Do NOT re-count from the examples — trust the supplied total.
 - Quote 2–4 of the strongest concrete examples (the example list is your evidence).
-- Synthesize the subset theme_notes into 1–2 coherent paragraphs describing the pattern, common variations, and any notable outliers.
-- Keep the full answer under 300 words.
+- Synthesize the observations into 1–2 coherent paragraphs describing the pattern, common variations, and any notable outliers.
+- Keep the full answer under 400 words.
+- End with one concrete, actionable observation — what the pattern implies for the bot's design or operator's next action. Do NOT close with generic platitudes like "improvements could enhance engagement" or "this suggests room for improvement".
+- Never reference "subsets", "chunks", "batches", or any internal grouping — speak only in terms of calls. The user does not know the analysis was chunked.
 - Include a one-line scope caveat ONLY IF scope materially affects the answer (e.g. the question asks about a time period that goes beyond the analysis window). Most answers do NOT need a caveat.
 - NEVER say "I can't provide exact numbers" or "check the dashboard for exact figures".
 ${FORMAT_RULES}
 
 AGGREGATE COUNT: ${totalMatching} of ${totalCorpus} calls matched (~${totalCorpus ? Math.round((totalMatching / totalCorpus) * 100) : 0}%)
 
-SUBSET THEME NOTES:
+OBSERVATIONS ACROSS THE CORPUS:
 ${themeBullets}
 
 EXAMPLES (call_id and English snippet):
