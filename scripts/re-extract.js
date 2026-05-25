@@ -85,14 +85,14 @@ Extract three fields:
 
 3. drop_reason — the DOMINANT reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick ONE bucket:
    - "silent_user" — user said almost nothing (≤3 words); essentially just answered the phone. No engagement signal.
-   - "early_hangup" — user briefly expressed interest ("yes, jobs", "haan kaam chahiye", "tell me more") but the call ended very early (typically <30s) before the bot could collect profile, show jobs, or progress meaningfully. The conversation barely started.
+   - "early_hangup" — user engaged briefly (said "yes", "haan kaam chahiye", asked about jobs, even heard a job listing) but the call ended WITHOUT a clear outcome — they didn't apply, didn't explicitly decline, didn't reject specific jobs, and the bot didn't fail. Just hung up / call ended. This is the catch-all for "user was interested-ish but call ended inconclusively". Usually short (<60s) but can be longer if meandering. USE THIS WHENEVER no other specific bucket clearly applies and the user wasn't fully silent.
    - "bot_didnt_understand" — bot repeatedly asked the user to repeat / "I didn't catch that" / responded with non-sequiturs because it couldn't parse the user's Hindi/Kannada speech.
    - "profile_collection_loop" — bot got stuck asking for name/age/location/qualification; user disengaged before any job was discussed.
-   - "no_matching_jobs" — bot DID show jobs (jobs_shown=Yes is a strong hint) but none fit the user's stated preference (wrong location, salary too low, wrong skill / job type). User rejected the shown jobs.
-   - "apply_failed" — same population as tried_to_apply=Yes (consented or tool fired but no success confirmation).
-   - "user_declined" — user engaged but explicitly refused ("not looking", "no", "abhi nahi", "ಬೇಡ"). Said no — distinct from silent_user.
+   - "no_matching_jobs" — user EXPLICITLY rejected the shown jobs (wrong location, salary too low, wrong skill / job type). Must have explicit rejection signal — "just heard them and hung up" is early_hangup, NOT this.
+   - "apply_failed" — same population as tried_to_apply=Yes (consented or tool fired but no success confirmation), or bot failed to initiate the application process.
+   - "user_declined" — user explicitly refused ("not looking", "no", "abhi nahi", "ಬೇಡ"), or said "will think about it later" / "after my exams" / "currently employed, maybe later". Must be explicit refusal or deferral.
    - "language_mismatch" — user wanted a language different from the bot, or spoke a language the bot couldn't handle (Telugu, Marathi, English-only).
-   - "other" — none of the above. Use sparingly.
+   - "other" — TRULY none of the above. Should be RARE (<5% of drops). If you're unsure between early_hangup and other, pick early_hangup.
    Pick the DOMINANT reason when multiple apply.
 
 Output valid JSON only.`;
