@@ -76,7 +76,7 @@ const extractionSchema = {
     },
     call_language: { type: 'string', enum: ['Hindi', 'Kannada', 'English', 'Unknown'] },
     summary_3line: { type: 'string' },
-    tried_to_apply: { type: 'string', enum: ['Yes', 'No'] },
+    // tried_to_apply computed deterministically from the apply_job tool call, not the LLM.
     drop_reason: {
       type: ['string', 'null'],
       enum: [
@@ -95,10 +95,22 @@ const extractionSchema = {
   },
   required: [
     'call_answered', 'call_engaged', 'applied_to_job', 'applications_count',
-    'jobs_shown', 'primary_topic', 'call_language', 'summary_3line', 'tried_to_apply',
+    'jobs_shown', 'primary_topic', 'call_language', 'summary_3line',
     'drop_reason',
   ],
 };
+
+// Deterministic: the bot only fires apply_job after the user consents, so an
+// apply_job tool call in the raw transcript is proof of a genuine apply attempt.
+function detectApplyJobCalled(rawTranscript) {
+  let parsed;
+  try { parsed = JSON.parse(rawTranscript); } catch { return false; }
+  if (!Array.isArray(parsed)) return false;
+  return parsed.some((m) =>
+    Array.isArray(m?.tool_calls) &&
+    m.tool_calls.some((tc) => /apply/i.test(tc?.function?.name || tc?.name || ''))
+  );
+}
 
 function buildPrompt({ duration, transcript_text, campaignLanguage }) {
   return `You are analyzing a call transcript from "Kaam Ki Baat", a voice AI helping Indian workers find jobs. The conversation may be in ${campaignLanguage}.
@@ -113,14 +125,13 @@ RULES:
 1. call_answered — Yes if duration > 0 and transcript has meaningful content, else No
 2. call_engaged — Yes only if call_answered=Yes AND duration > 10 seconds
 3. applied_to_job — Yes if application was CONFIRMED submitted (bot said "apply ho gaya", "application submitted" or equivalent)
-4. tried_to_apply — FAILED apply attempts only. CONTEXT: the bot only calls the apply tool AFTER the user consents, so an apply tool call (assistant[tool_call:apply...]) is proof of consent. Yes when BOTH: (i) the user consented — evidenced by an apply tool call in the transcript OR the user explicitly saying to apply, AND (ii) the application did NOT succeed. If the application succeeded (applied_to_job=Yes), this MUST be No. If there is no apply tool call and the user never said to apply, this is No.
 10. drop_reason — dominant reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick ONE:
     - "silent_user" (user said ≤3 words; essentially just answered the phone),
     - "early_hangup" (user briefly expressed interest but call ended <30s before any progression),
     - "bot_didnt_understand" (bot repeatedly asked to repeat / parsing failure),
     - "profile_collection_loop" (stuck collecting name/age/location, user gave up),
     - "no_matching_jobs" (jobs shown but user rejected for salary/location/skill mismatch),
-    - "apply_failed" (consented OR apply tool fired, but no success confirmation — same population as tried_to_apply=Yes),
+    - "apply_failed" (apply_job tool fired but no success confirmation, or bot failed to initiate the application),
     - "user_declined" (engaged but explicitly refused: "not looking", "no", "abhi nahi", "ಬೇಡ"),
     - "language_mismatch" (user wanted Telugu/Marathi/etc. the bot doesn't speak, or bot's language was wrong),
     - "other" (use sparingly).
@@ -210,7 +221,9 @@ function cleanTranscript(raw) {
         .filter((m) => m?.role !== 'tool')
         .map((m) => {
           if (m?.role === 'assistant' && m.tool_calls && !m.content) {
-            return { role: 'assistant', content: '[tool call]' };
+            // Preserve tool-call names so apply detection stays possible later.
+            const names = m.tool_calls.map((tc) => tc?.function?.name || tc?.name || 'tool').join(',');
+            return { role: 'assistant', content: `[tool call: ${names}]` };
           }
           return { role: m.role, content: m.content ?? '' };
         });
@@ -225,6 +238,12 @@ function buildRow(raw, extracted, campaignType, language) {
   const phone = (raw.contact_phone || '').trim().replace(/^\+?91/, '91');
   const datetime_ist = (raw.call_start_time_ist || '').replace(' IST', '').trim();
   const raw_transcript = cleanTranscript(raw.call_transcript);
+  // tried_to_apply is deterministic: apply_job tool fired AND not a confirmed success.
+  const tried_to_apply =
+    detectApplyJobCalled(raw.call_transcript) &&
+    String(extracted.applied_to_job).toLowerCase() !== 'yes'
+      ? 'Yes'
+      : 'No';
 
   return [
     CAMPAIGN_DAY,                         //  1 campaign_day
@@ -246,7 +265,7 @@ function buildRow(raw, extracted, campaignType, language) {
     raw.call_recording_url || '',         // 17
     extracted.summary_3line,              // 18 final_summary
     raw_transcript,                       // 19 call_transcript
-    extracted.tried_to_apply,            // 20 tried_to_apply
+    tried_to_apply,                       // 20 tried_to_apply (deterministic)
     extracted.drop_reason ?? '',         // 21 drop_reason
   ];
 }

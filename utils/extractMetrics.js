@@ -23,7 +23,9 @@ const metricsSchema = {
       enum: ['Hindi', 'Kannada', 'English', 'Unknown'],
     },
     summary_3line: { type: 'string' },
-    tried_to_apply: { type: 'string', enum: ['Yes', 'No'] },
+    // NOTE: tried_to_apply is NOT extracted by the LLM. It is computed
+    // deterministically in code from the raw transcript (apply_job tool call
+    // present + application not successful). See taskA_metrics below.
     // drop_reason is populated ONLY when call_answered=Yes AND applied_to_job=No.
     // For successful applications or unanswered calls, the model emits null
     // (strict mode requires the field present even when null).
@@ -46,7 +48,7 @@ const metricsSchema = {
   required: [
     'call_id', 'phone', 'call_duration_seconds', 'call_datetime_ist',
     'call_answered', 'call_engaged', 'applied_to_job', 'applications_count',
-    'jobs_shown', 'primary_topic', 'call_language', 'summary_3line', 'tried_to_apply',
+    'jobs_shown', 'primary_topic', 'call_language', 'summary_3line',
     'drop_reason',
   ],
 };
@@ -77,14 +79,13 @@ RULES:
 10. primary_topic — one of the 5 allowed values
 11. call_language — one of the 4 allowed values
 12. summary_3line — a concise 3-line plain-English summary FROM THE USER'S POINT OF VIEW. Line 1: the user's overall response/engagement (interested, disengaged, confused, hung up, etc.). Line 2: key actions the user took (asked for jobs in X city, agreed to apply for job Y, gave their name/age, etc.). Line 3: key failures or unresolved issues from the user's perspective (couldn't find jobs they wanted, apply failed, bot didn't understand them, call dropped, etc. — or "None" if the call went smoothly). Use \\n as separator. If no conversation, return "Call not answered."
-13. tried_to_apply — FAILED apply attempts only. IMPORTANT CONTEXT: the bot only ever calls the apply_jobs tool AFTER the user says yes to "should I apply?", so an apply_jobs tool call in the transcript (e.g. assistant[tool_call:apply...]) is itself proof the user consented to apply. Yes when BOTH are true: (i) the user consented to apply — evidenced EITHER by an apply_jobs tool call appearing in the transcript, OR by the user explicitly saying to apply ("haan apply karo", "yes", "ಅಪ್ಲೈ ಮಾಡಿ"). AND (ii) the application did NOT succeed — there is no "अप्लाई हो गया है" / "apply ho gaya" / "application submitted" confirmation, or the bot acknowledged an error from the tool. If the application succeeded (applied_to_job=Yes), this MUST be No. If there is no apply tool call AND the user never said to apply, this is No.
-14. drop_reason — categorise the DOMINANT reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick the ONE bucket that best describes the dropoff:
+13. drop_reason — categorise the DOMINANT reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick the ONE bucket that best describes the dropoff:
     - "silent_user" — user said almost nothing (≤3 words); essentially just answered the phone. No engagement signal.
     - "early_hangup" — user engaged briefly (said "yes", "haan kaam chahiye", asked about jobs, even heard a job listing) but the call ended WITHOUT a clear outcome — they didn't apply, didn't explicitly decline, didn't reject specific jobs, and the bot didn't fail. Just hung up / call ended. This is the catch-all for "user was interested-ish but call ended inconclusively". Usually short calls (<60s) but can be longer if the conversation was meandering. USE THIS WHENEVER no other specific bucket clearly applies and the user wasn't fully silent.
     - "bot_didnt_understand" — bot repeatedly asked the user to repeat / "I didn't catch that" / responded with non-sequiturs because it couldn't parse the user's Hindi/Kannada speech.
     - "profile_collection_loop" — bot got stuck asking for the user's name, age, location, qualification, etc.; user disengaged before any job was actually discussed.
     - "no_matching_jobs" — user EXPLICITLY rejected the shown jobs (wrong location, salary too low, wrong skill / job type). Must have explicit rejection signal — "just heard them and hung up" is early_hangup, NOT this.
-    - "apply_failed" — same population as tried_to_apply=Yes: user consented to apply OR bot invoked the apply tool, but the application did not confirm successfully. Also includes cases where the bot failed to initiate the application process.
+    - "apply_failed" — the apply_job tool was invoked (or the bot tried to submit an application) but it did not confirm successfully. Also includes cases where the bot failed to initiate the application process.
     - "user_declined" — user explicitly refused ("not looking for work", "no", "abhi nahi", "ಬೇಡ"), or said "will think about it later" / "after my exams" / "currently employed, maybe later". Must be explicit refusal or deferral.
     - "language_mismatch" — user wanted a language different from what the bot was speaking, or spoke a language (Telugu, Marathi, English-only) the bot couldn't handle.
     - "other" — TRULY none of the above. Should be RARE (<5% of drops). If you're unsure between early_hangup and other, pick early_hangup.
@@ -115,12 +116,28 @@ export async function taskA_metrics(payload) {
   const outcome = body.outcome ?? '';
   const start_time = body.call_start_time ?? '';
   const recording_url = body.call_recording_url ?? '';
-  // Strip tool-call result messages (large job-listing blobs) before storing
+
+  // Deterministic apply detection: the bot only ever invokes the apply_job tool
+  // AFTER the user consents to apply, so the presence of an apply_job tool call
+  // in the raw transcript is reliable proof of a genuine apply attempt.
+  const toolCallNames = transcript.flatMap((t) =>
+    Array.isArray(t?.tool_calls)
+      ? t.tool_calls.map((tc) => tc?.function?.name || tc?.name || '')
+      : []
+  );
+  const applyJobCalled = toolCallNames.some((n) => /apply/i.test(n));
+
+  // Strip tool-call RESULT messages (large job-listing blobs) before storing,
+  // but PRESERVE the tool-call names so historical apply detection stays possible.
   const cleaned_transcript = transcript
     .filter((t) => t?.role !== 'tool')
-    .map((t) => t?.role === 'assistant' && t.tool_calls && !t.content
-      ? { role: 'assistant', content: '[tool call]' }
-      : { role: t.role, content: t.content ?? '' });
+    .map((t) => {
+      if (t?.role === 'assistant' && Array.isArray(t.tool_calls) && t.tool_calls.length && !t.content) {
+        const names = t.tool_calls.map((tc) => tc?.function?.name || tc?.name || 'tool').join(',');
+        return { role: 'assistant', content: `[tool call: ${names}]` };
+      }
+      return { role: t.role, content: t.content ?? '' };
+    });
   const raw_transcript_str = JSON.stringify(cleaned_transcript);
   const raw_transcript = raw_transcript_str.length > 40000
     ? raw_transcript_str.slice(0, 40000) + '…"]'
@@ -143,12 +160,16 @@ export async function taskA_metrics(payload) {
   if (!content) throw new Error('OpenAI returned empty content for metrics');
   const m = JSON.parse(content);
 
-  // Deterministic guard: a successful application is never a failed apply
-  // attempt and never has a drop_reason. Enforce regardless of LLM output.
-  if (String(m.applied_to_job).toLowerCase() === 'yes') {
-    m.tried_to_apply = 'No';
-    m.drop_reason = null;
-  }
+  // tried_to_apply is computed deterministically (NOT from the LLM): the
+  // apply_job tool was invoked AND the application did not succeed. Since the
+  // bot only calls apply_job after the user consents, a tool call is proof of
+  // a genuine attempt; if applied_to_job is also Yes, the attempt succeeded so
+  // it's not a "failed attempt".
+  const applied = String(m.applied_to_job).toLowerCase() === 'yes';
+  m.tried_to_apply = applyJobCalled && !applied ? 'Yes' : 'No';
+
+  // A successful application never carries a drop_reason.
+  if (applied) m.drop_reason = null;
 
   // 19-column layout matches the Sheet1 header. Cols 1-4 are reserved for
   // manual fill (campaign_day, campaign_date, campaign_type, language); the
