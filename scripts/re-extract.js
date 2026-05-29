@@ -79,9 +79,9 @@ Extract three fields:
    Line 3: key failures or unresolved issues from the user's perspective (couldn't find jobs they wanted, apply failed with an error, bot didn't understand them, call dropped mid-flow, etc. — or "None" if smooth).
 
 2. tried_to_apply — FAILED apply attempts only. Yes ONLY when BOTH are true:
-   (i) user explicitly consented to apply ("apply", "haan apply karo", "yes", "ಅಪ್ಲೈ ಮಾಡಿ") OR the bot invoked an apply tool (assistant[tool_call:apply...]), AND
-   (ii) the application did NOT confirm successfully — no "apply ho gaya" / "application submitted" from the bot, or the bot acknowledged a tool error.
-   If applied_to_job=Yes, this MUST be No. If the user never consented and no apply tool was invoked, this is No.
+   (i) the USER EXPLICITLY said to apply / gave clear affirmative consent ("apply", "haan apply karo", "yes apply kar do", "ಅಪ್ಲೈ ಮಾಡಿ") — the bot invoking the apply tool on its own (assistant[tool_call:apply...]) is NOT sufficient; the user must have explicitly asked, AND
+   (ii) the application did NOT succeed — the apply API was never actually called, OR it was called and explicitly failed (no "apply ho gaya" / "application submitted" confirmation, or the bot acknowledged a tool error).
+   If the application succeeded (applied_to_job=Yes), this MUST be No. If the user never explicitly said to apply, this is No.
 
 3. drop_reason — the DOMINANT reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick ONE bucket:
    - "silent_user" — user said almost nothing (≤3 words); essentially just answered the phone. No engagement signal.

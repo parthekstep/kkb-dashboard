@@ -113,7 +113,7 @@ RULES:
 1. call_answered — Yes if duration > 0 and transcript has meaningful content, else No
 2. call_engaged — Yes only if call_answered=Yes AND duration > 10 seconds
 3. applied_to_job — Yes if application was CONFIRMED submitted (bot said "apply ho gaya", "application submitted" or equivalent)
-4. tried_to_apply — FAILED apply attempts only. Yes ONLY when BOTH: (i) user consented OR bot invoked apply tool, AND (ii) the application did NOT confirm successfully. If applied_to_job=Yes, this MUST be No. If user never consented and no apply tool was invoked, this is No.
+4. tried_to_apply — FAILED apply attempts only. Yes ONLY when BOTH: (i) the USER EXPLICITLY said to apply / gave clear affirmative consent (bot invoking the apply tool on its own is NOT sufficient), AND (ii) the application did NOT succeed (API never called, or called and explicitly failed). If the application succeeded (applied_to_job=Yes), this MUST be No. If the user never explicitly said to apply, this is No.
 10. drop_reason — dominant reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick ONE:
     - "silent_user" (user said ≤3 words; essentially just answered the phone),
     - "early_hangup" (user briefly expressed interest but call ended <30s before any progression),
