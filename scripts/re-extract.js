@@ -193,6 +193,12 @@ async function main() {
     if (!text) return { ...t, summary_3line: 'No transcript content.', tried_to_apply: 'No', drop_reason: null };
     try {
       const ex = await extract(text, t.duration, t.jobs_shown, t.applied_to_job, t.call_answered);
+      // Deterministic guard: a successful application can never be a failed
+      // attempt, and never has a drop_reason. Don't trust the LLM to honour it.
+      if (String(t.applied_to_job).toLowerCase() === 'yes') {
+        ex.tried_to_apply = 'No';
+        ex.drop_reason = null;
+      }
       return { ...t, ...ex };
     } catch (e) {
       failCount++;

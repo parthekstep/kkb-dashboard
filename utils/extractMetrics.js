@@ -143,6 +143,13 @@ export async function taskA_metrics(payload) {
   if (!content) throw new Error('OpenAI returned empty content for metrics');
   const m = JSON.parse(content);
 
+  // Deterministic guard: a successful application is never a failed apply
+  // attempt and never has a drop_reason. Enforce regardless of LLM output.
+  if (String(m.applied_to_job).toLowerCase() === 'yes') {
+    m.tried_to_apply = 'No';
+    m.drop_reason = null;
+  }
+
   // 19-column layout matches the Sheet1 header. Cols 1-4 are reserved for
   // manual fill (campaign_day, campaign_date, campaign_type, language); the
   // webhook leaves them blank so a human/script can populate them later.
