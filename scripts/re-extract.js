@@ -78,10 +78,10 @@ Extract three fields:
    Line 2: key actions the user took (asked for jobs in X city, agreed to apply for job Y, gave name/age, asked for more details, etc.).
    Line 3: key failures or unresolved issues from the user's perspective (couldn't find jobs they wanted, apply failed with an error, bot didn't understand them, call dropped mid-flow, etc. — or "None" if smooth).
 
-2. tried_to_apply — FAILED apply attempts only. Yes ONLY when BOTH are true:
-   (i) the USER EXPLICITLY said to apply / gave clear affirmative consent ("apply", "haan apply karo", "yes apply kar do", "ಅಪ್ಲೈ ಮಾಡಿ") — the bot invoking the apply tool on its own (assistant[tool_call:apply...]) is NOT sufficient; the user must have explicitly asked, AND
-   (ii) the application did NOT succeed — the apply API was never actually called, OR it was called and explicitly failed (no "apply ho gaya" / "application submitted" confirmation, or the bot acknowledged a tool error).
-   If the application succeeded (applied_to_job=Yes), this MUST be No. If the user never explicitly said to apply, this is No.
+2. tried_to_apply — FAILED apply attempts only. CONTEXT: the bot only ever calls the apply tool AFTER the user says yes to "should I apply?", so an apply tool call (assistant[tool_call:apply...]) is itself proof the user consented. Yes when BOTH are true:
+   (i) the user consented to apply — evidenced EITHER by an apply tool call (assistant[tool_call:apply...]) in the transcript, OR by the user explicitly saying to apply ("apply", "haan apply karo", "yes", "ಅಪ್ಲೈ ಮಾಡಿ"), AND
+   (ii) the application did NOT succeed — no "apply ho gaya" / "application submitted" confirmation, or the bot acknowledged a tool error.
+   If the application succeeded (applied_to_job=Yes), this MUST be No. If there is no apply tool call AND the user never said to apply, this is No.
 
 3. drop_reason — the DOMINANT reason this answered call did NOT produce an application. MUST be null if call_answered=No OR applied_to_job=Yes. Otherwise pick ONE bucket:
    - "silent_user" — user said almost nothing (≤3 words); essentially just answered the phone. No engagement signal.
